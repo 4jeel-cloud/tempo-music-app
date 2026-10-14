@@ -53,7 +53,7 @@
 
 ## Installation
 
-Grab the latest signed APK from the [Releases](https://github.com/4jeel-cloud/Tempo/releases)
+Grab the latest signed APK from the [Releases](https://github.com/4jeel-cloud/tempo-music-app/releases)
 page and install it (you may need to allow installation from unknown sources).
 
 > **Note:** if Android shows a "built for an older version of Android" / Play Protect

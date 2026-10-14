@@ -1,0 +1,2 @@
+* Fixed blurry album artwork: yt3.googleusercontent.com thumbnails are now resized correctly
+* Sharp, high-resolution album art on the player and lists

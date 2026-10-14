@@ -2,6 +2,14 @@ package it.vfsfitvnm.innertube.models
 
 import kotlinx.serialization.Serializable
 
+// YouTube serves album art from (lh3|yt3).googleusercontent.com. The yt3.googleusercontent.com
+// host was added later and is easy to miss, in which case the ~60px thumbnail the API returns
+// is upscaled and looks blurry. Matching both hosts (and preserving the query string) fixes it.
+private val GOOGLEUSERCONTENT_SIZE_PATTERN =
+    Regex("^(https://(?:lh3|yt3)\\.googleusercontent\\.com/[^?]*?)=w(\\d+)-h(\\d+)[^?]*(\\?.*)?$")
+private val GGPHT_SIZE_PATTERN =
+    Regex("^(https://yt3\\.ggpht\\.com/[^?=]+)=(?:s\\d+|w\\d+-h\\d+)[^?]*(\\?.*)?$")
+
 @Serializable
 data class Thumbnail(
     val url: String,
@@ -12,12 +20,13 @@ data class Thumbnail(
         get() = !url.startsWith("https://i.ytimg.com")
 
     fun size(size: Int): String {
-        val base = url.substringBefore("=")
-        return when {
-            url.startsWith("https://lh3.googleusercontent.com") -> "$base=w$size-h$size-l90-rj"
-            url.startsWith("https://yt3.ggpht.com") -> "$base=w$size-h$size"
-            else -> url
+        GOOGLEUSERCONTENT_SIZE_PATTERN.matchEntire(url)?.groupValues?.let { group ->
+            return "${group[1]}=w$size-h$size-p-l90-rj${group[4]}"
         }
+        GGPHT_SIZE_PATTERN.matchEntire(url)?.groupValues?.let { group ->
+            return "${group[1]}=w$size-h$size-p-l90-rj${group[2]}"
+        }
+        return url
     }
 }
 

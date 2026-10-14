@@ -50,7 +50,7 @@ fun About() {
             title = "GitHub",
             text = "View the source code",
             onClick = {
-                uriHandler.openUri("https://github.com/4jeel-cloud/Tempo")
+                uriHandler.openUri("https://github.com/4jeel-cloud/tempo-music-app")
             }
         )
 
@@ -62,7 +62,7 @@ fun About() {
             title = "Report an issue",
             text = "You will be redirected to GitHub",
             onClick = {
-                uriHandler.openUri("https://github.com/4jeel-cloud/Tempo/issues/new?assignees=&labels=bug&template=bug_report.yaml")
+                uriHandler.openUri("https://github.com/4jeel-cloud/tempo-music-app/issues/new?assignees=&labels=bug&template=bug_report.yaml")
             }
         )
 
@@ -70,7 +70,7 @@ fun About() {
             title = "Request a feature or suggest an idea",
             text = "You will be redirected to GitHub",
             onClick = {
-                uriHandler.openUri("https://github.com/4jeel-cloud/Tempo/issues/new?assignees=&labels=enhancement&template=feature_request.yaml")
+                uriHandler.openUri("https://github.com/4jeel-cloud/tempo-music-app/issues/new?assignees=&labels=enhancement&template=feature_request.yaml")
             }
         )
     }

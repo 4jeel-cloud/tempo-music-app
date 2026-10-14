@@ -76,14 +76,20 @@ val Song.asMediaItem: MediaItem
         .setCustomCacheKey(id)
         .build()
 
+private val GOOGLEUSERCONTENT_SIZE_PATTERN =
+    Regex("^(https://(?:lh3|yt3)\\.googleusercontent\\.com/[^?]*?)=w(\\d+)-h(\\d+)[^?]*(\\?.*)?$")
+private val GGPHT_SIZE_PATTERN =
+    Regex("^(https://yt3\\.ggpht\\.com/[^?=]+)=(?:s\\d+|w\\d+-h\\d+)[^?]*(\\?.*)?$")
+
 fun String?.thumbnail(size: Int): String? {
     if (this == null) return null
-    val base = substringBefore("=")
-    return when {
-        startsWith("https://lh3.googleusercontent.com") -> "$base=w$size-h$size-l90-rj"
-        startsWith("https://yt3.ggpht.com") -> "$base=w$size-h$size"
-        else -> this
+    GOOGLEUSERCONTENT_SIZE_PATTERN.matchEntire(this)?.groupValues?.let { group ->
+        return "${group[1]}=w$size-h$size-p-l90-rj${group[4]}"
     }
+    GGPHT_SIZE_PATTERN.matchEntire(this)?.groupValues?.let { group ->
+        return "${group[1]}=w$size-h$size-p-l90-rj${group[2]}"
+    }
+    return this
 }
 
 fun Uri?.thumbnail(size: Int): Uri? {
