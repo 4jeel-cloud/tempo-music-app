@@ -13,8 +13,20 @@ data class BrowseResponse(
     @Serializable
     data class Contents(
         val singleColumnBrowseResultsRenderer: Tabs?,
+        val twoColumnBrowseResultsRenderer: TwoColumnBrowseResultsRenderer?,
         val sectionListRenderer: SectionListRenderer?,
-    )
+    ) {
+        @Serializable
+        data class TwoColumnBrowseResultsRenderer(
+            val secondaryContents: SecondaryContents?,
+            val tabs: List<Tabs.Tab>?,
+        ) {
+            @Serializable
+            data class SecondaryContents(
+                val sectionListRenderer: SectionListRenderer?,
+            )
+        }
+    }
 
     @Serializable
     data class Header @OptIn(ExperimentalSerializationApi::class) constructor(

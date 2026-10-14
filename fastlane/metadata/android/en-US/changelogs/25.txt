@@ -1,0 +1,3 @@
+* Fixed albums: tracks and metadata (title, artist, year) now load correctly
+* Turntable widget can now be resized up to 4x4
+* App now targets Android 15 (API 35) so newer devices no longer warn about an outdated app

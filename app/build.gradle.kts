@@ -14,14 +14,14 @@ val keystoreProperties = Properties().apply {
 }
 
 android {
-    compileSdk = 33
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "it.vfsfitvnm.vimusic"
         minSdk = 21
-        targetSdk = 33
-        versionCode = 24
-        versionName = "0.5.8"
+        targetSdk = 35
+        versionCode = 25
+        versionName = "0.5.9"
     }
 
     splits {

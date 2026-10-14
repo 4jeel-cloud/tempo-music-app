@@ -8,6 +8,7 @@ import it.vfsfitvnm.innertube.models.BrowseResponse
 import it.vfsfitvnm.innertube.models.ContinuationResponse
 import it.vfsfitvnm.innertube.models.MusicCarouselShelfRenderer
 import it.vfsfitvnm.innertube.models.MusicShelfRenderer
+import it.vfsfitvnm.innertube.models.SectionListRenderer
 import it.vfsfitvnm.innertube.models.bodies.BrowseBody
 import it.vfsfitvnm.innertube.models.largestThumbnail
 import it.vfsfitvnm.innertube.models.bodies.ContinuationBody
@@ -17,15 +18,23 @@ import it.vfsfitvnm.innertube.utils.runCatchingNonCancellable
 suspend fun Innertube.playlistPage(body: BrowseBody) = runCatchingNonCancellable {
     val response = client.post(browse) {
         setBody(body)
-        mask("contents.singleColumnBrowseResultsRenderer.tabs.tabRenderer.content.sectionListRenderer.contents(musicPlaylistShelfRenderer(continuations,contents.$musicResponsiveListItemRendererMask),musicCarouselShelfRenderer.contents.$musicTwoRowItemRendererMask),header.musicDetailHeaderRenderer(title,subtitle,thumbnail),microformat")
+        mask(
+            "contents.singleColumnBrowseResultsRenderer.tabs.tabRenderer.content.sectionListRenderer.contents(" +
+                "musicShelfRenderer(continuations,contents.$musicResponsiveListItemRendererMask)," +
+                "musicPlaylistShelfRenderer(continuations,contents.$musicResponsiveListItemRendererMask)," +
+                "musicCarouselShelfRenderer.contents.$musicTwoRowItemRendererMask)," +
+                "contents.twoColumnBrowseResultsRenderer(" +
+                "tabs.tabRenderer.content.sectionListRenderer.contents." +
+                "musicResponsiveHeaderRenderer(title,subtitle,straplineTextOne,secondSubtitle,thumbnail)," +
+                "secondaryContents.sectionListRenderer.contents(" +
+                "musicShelfRenderer(continuations,contents.$musicResponsiveListItemRendererMask)," +
+                "musicPlaylistShelfRenderer(continuations,contents.$musicResponsiveListItemRendererMask)," +
+                "musicCarouselShelfRenderer.contents.$musicTwoRowItemRendererMask))," +
+                "header.musicDetailHeaderRenderer(title,subtitle,secondSubtitle,thumbnail),microformat"
+        )
     }.body<BrowseResponse>()
 
-    val musicDetailHeaderRenderer = response
-        .header
-        ?.musicDetailHeaderRenderer
-
-    val sectionListRendererContents = response
-        .contents
+    val singleColumnContents = response.contents
         ?.singleColumnBrowseResultsRenderer
         ?.tabs
         ?.firstOrNull()
@@ -34,35 +43,73 @@ suspend fun Innertube.playlistPage(body: BrowseBody) = runCatchingNonCancellable
         ?.sectionListRenderer
         ?.contents
 
-    val musicShelfRenderer = sectionListRendererContents
+    val twoColumnBrowseResultsRenderer = response.contents
+        ?.twoColumnBrowseResultsRenderer
+
+    val twoColumnTabContents = twoColumnBrowseResultsRenderer
+        ?.tabs
         ?.firstOrNull()
-        ?.musicShelfRenderer
+        ?.tabRenderer
+        ?.content
+        ?.sectionListRenderer
+        ?.contents
+
+    val twoColumnSecondaryContents = twoColumnBrowseResultsRenderer
+        ?.secondaryContents
+        ?.sectionListRenderer
+        ?.contents
+
+    // Older responses carried the header at the top level (musicDetailHeaderRenderer); the newer
+    // two-column layout puts a musicResponsiveHeaderRenderer inside the tab's section list instead.
+    val musicDetailHeaderRenderer = response.header
+        ?.musicDetailHeaderRenderer
+
+    val musicResponsiveHeaderRenderer = twoColumnTabContents
+        ?.firstNotNullOfOrNull(SectionListRenderer.Content::musicResponsiveHeaderRenderer)
+
+    val sectionListRendererContents = singleColumnContents
+        ?: twoColumnSecondaryContents
+
+    val musicShelfRenderer = sectionListRendererContents
+        ?.firstNotNullOfOrNull(SectionListRenderer.Content::musicShelfRenderer)
 
     val musicCarouselShelfRenderer = sectionListRendererContents
-        ?.getOrNull(1)
-        ?.musicCarouselShelfRenderer
+        ?.firstNotNullOfOrNull(SectionListRenderer.Content::musicCarouselShelfRenderer)
 
     Innertube.PlaylistOrAlbumPage(
-        title = musicDetailHeaderRenderer
+        title = musicResponsiveHeaderRenderer
             ?.title
-            ?.text,
-        thumbnail = musicDetailHeaderRenderer
-            ?.thumbnail
+            ?.text
+            ?: musicDetailHeaderRenderer
+                ?.title
+                ?.text,
+        thumbnail = (musicResponsiveHeaderRenderer?.thumbnail ?: musicDetailHeaderRenderer?.thumbnail)
             ?.musicThumbnailRenderer
             ?.thumbnail
             ?.thumbnails
             ?.largestThumbnail(),
-        authors = musicDetailHeaderRenderer
+        authors = musicResponsiveHeaderRenderer
+            ?.straplineTextOne
+            ?.splitBySeparator()
+            ?.flatten()
+            ?.map(Innertube::Info)
+            ?: musicDetailHeaderRenderer
+                ?.subtitle
+                ?.splitBySeparator()
+                ?.getOrNull(1)
+                ?.map(Innertube::Info),
+        year = musicResponsiveHeaderRenderer
             ?.subtitle
             ?.splitBySeparator()
             ?.getOrNull(1)
-            ?.map(Innertube::Info),
-        year = musicDetailHeaderRenderer
-            ?.subtitle
-            ?.splitBySeparator()
-            ?.getOrNull(2)
             ?.firstOrNull()
-            ?.text,
+            ?.text
+            ?: musicDetailHeaderRenderer
+                ?.subtitle
+                ?.splitBySeparator()
+                ?.getOrNull(2)
+                ?.firstOrNull()
+                ?.text,
         url = response
             .microformat
             ?.microformatDataRenderer
