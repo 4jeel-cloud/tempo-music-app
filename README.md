@@ -1,6 +1,5 @@
 <div align="center">
-    <img src="./docs/logo.png" width="160" height="160" style="display: block; margin: 0 auto"/>
-    <h1>Tempo</h1>
+    <img src="./docs/banner.png" width="640" alt="Tempo"/>
     <p>An Android application for streaming music from YouTube Music</p>
 </div>
 
@@ -18,20 +17,18 @@
 
 ## About
 
-**Tempo** is a lightweight, ad-free YouTube Music client for Android. It is a fork of
-[ViMusic](https://github.com/vfsfitvnm/ViMusic) with a rebuilt, actively maintained
-playback engine and a set of quality-of-life additions.
+**Tempo** is a lightweight, ad-free YouTube Music client for Android.
 
-### What's different in this fork
+### Highlights
 
-- **Reliable playback.** Streaming was broken on newer YouTube clients, so Tempo
-  resolves audio through [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor)
-  first and falls back to the legacy InnerTube path.
+- **Reliable playback.** Streaming is resolved through
+  [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor), with the
+  legacy InnerTube path kept as a fallback.
 - **Home-screen widgets.** Now Playing, Turntable and Playlists widgets with full
   playback controls and shortcuts to your liked songs, playlists and top songs.
-- **Better artwork.** Picks the highest-resolution thumbnail and requests it at a
-  valid size, so album art is sharp on every screen.
-- **Working Quick Picks / related content.** The "Related" tab is now resolved
+- **Sharp artwork.** Picks the highest-resolution thumbnail and requests it at a
+  valid size, so album art stays crisp on every screen.
+- **Working Quick Picks / related content.** The "Related" tab is resolved
   correctly on album, artist and playlist pages.
 
 ## Features
@@ -56,7 +53,7 @@ playback engine and a set of quality-of-life additions.
 
 ## Installation
 
-Grab the latest signed APK from the [Releases](https://github.com/4jeel-cloud/ViMusic-back/releases)
+Grab the latest signed APK from the [Releases](https://github.com/4jeel-cloud/Tempo/releases)
 page and install it (you may need to allow installation from unknown sources).
 
 > **Note:** if Android shows a "built for an older version of Android" / Play Protect
@@ -84,7 +81,7 @@ in this project are owned by the respective owners.
 
 ## Acknowledgments
 
-- [**ViMusic**](https://github.com/vfsfitvnm/ViMusic): the original project this fork is based on.
+- [**ViMusic**](https://github.com/vfsfitvnm/ViMusic): the original project Tempo is based on.
 - [**NewPipeExtractor**](https://github.com/TeamNewPipe/NewPipeExtractor): the stream extraction library that powers playback.
 - [**YouTube-Internal-Clients**](https://github.com/zerodytrash/YouTube-Internal-Clients): a research project that documents hidden YouTube API clients.
 - [**ionicons**](https://github.com/ionic-team/ionicons): premium hand-crafted icons built by Ionic.

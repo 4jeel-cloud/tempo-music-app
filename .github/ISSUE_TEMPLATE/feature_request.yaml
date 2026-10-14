@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        ## ⚠️ Make sure the feature you are requesting is not already implemented in the [latest version](https://github.com/4jeel-cloud/ViMusic-back/releases/latest).
+        ## ⚠️ Make sure the feature you are requesting is not already implemented in the [latest version](https://github.com/4jeel-cloud/Tempo/releases/latest).
         ## ⚠️ Make sure there is no issue requesting the same feature already.
 
   - type: textarea
