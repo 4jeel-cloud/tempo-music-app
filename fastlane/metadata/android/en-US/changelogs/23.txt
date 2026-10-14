@@ -1,0 +1,4 @@
+* Rebuilt streaming engine (NewPipeExtractor) to fix playback
+* Added home-screen widgets: Now Playing, Turntable and Playlists
+* Fixed blurry album artwork on the player and lists
+* Fixed Quick Picks / related content on album, artist and playlist pages

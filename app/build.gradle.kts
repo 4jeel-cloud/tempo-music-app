@@ -47,7 +47,7 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
-            manifestPlaceholders["appName"] = "Debug"
+            manifestPlaceholders["appName"] = "Tempo Debug"
         }
 
         release {
@@ -55,7 +55,7 @@ android {
             // need, which makes stream resolution fail silently on-device. Keep them intact.
             isMinifyEnabled = false
             isShrinkResources = false
-            manifestPlaceholders["appName"] = "ViMusic"
+            manifestPlaceholders["appName"] = "Tempo"
             signingConfig = if (keystorePropertiesFile.exists()) {
                 signingConfigs.getByName("release")
             } else {

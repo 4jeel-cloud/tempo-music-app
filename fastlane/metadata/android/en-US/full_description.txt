@@ -1,3 +1,5 @@
+<b>Tempo — a lightweight, ad-free YouTube Music client for Android.</b>
+
 <b>Features:</b>
 
 * Search and play any song or video from YouTube Music
@@ -11,10 +13,12 @@
 * Local playlists management
 * Queue management
 * Favorites and Offline built-in playlists
+* Home-screen widgets (Now Playing, Turntable, Playlists)
 * Sleep timer
 * Skip silence
 * Persistent queue
 * Loudness/audio normalization
 * Android Auto
+* Sharp, high-resolution album artwork
 * Simple and minimal UI
 * Ridiculously lightweight APK

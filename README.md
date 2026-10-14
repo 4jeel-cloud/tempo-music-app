@@ -1,6 +1,6 @@
 <div align="center">
-    <img src="./app/src/main/ic_launcher-playstore.png" width="128" height="128" style="display: block; margin: 0 auto"/>
-    <h1>ViMusic</h1>
+    <img src="./docs/logo.png" width="160" height="160" style="display: block; margin: 0 auto"/>
+    <h1>Tempo</h1>
     <p>An Android application for streaming music from YouTube Music</p>
 </div>
 
@@ -16,44 +16,79 @@
   <img src="./fastlane/metadata/android/en-US/images/phoneScreenshots/6.jpg" width="30%" />
 </p>
 
+## About
+
+**Tempo** is a lightweight, ad-free YouTube Music client for Android. It is a fork of
+[ViMusic](https://github.com/vfsfitvnm/ViMusic) with a rebuilt, actively maintained
+playback engine and a set of quality-of-life additions.
+
+### What's different in this fork
+
+- **Reliable playback.** Streaming was broken on newer YouTube clients, so Tempo
+  resolves audio through [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor)
+  first and falls back to the legacy InnerTube path.
+- **Home-screen widgets.** Now Playing, Turntable and Playlists widgets with full
+  playback controls and shortcuts to your liked songs, playlists and top songs.
+- **Better artwork.** Picks the highest-resolution thumbnail and requests it at a
+  valid size, so album art is sharp on every screen.
+- **Working Quick Picks / related content.** The "Related" tab is now resolved
+  correctly on album, artist and playlist pages.
+
 ## Features
+
 - Play (almost) any song or video from YouTube Music
-- Background playback
+- Background playback with a media notification
 - Cache audio chunks for offline playback
-- Search for songs, albums, artists videos and playlists
+- Search for songs, albums, artists, videos and playlists
 - Bookmark artists and albums
 - Import playlists
-- Fetch, display and edit songs lyrics or synchronized lyrics
+- Fetch, display and edit lyrics or synchronized lyrics
 - Local playlist management
-- Reorder songs in playlist or queue
-- Light/Dark/Dynamic theme
+- Reorder songs in a playlist or the queue
+- Light / Dark / Dynamic theme
 - Skip silence
 - Sleep timer
 - Audio normalization
 - Android Auto
 - Persistent queue
-- Open YouTube/YouTube Music links (`watch`, `playlist`, `channel`)
-- ...
+- Home-screen media widgets
+- Open YouTube / YouTube Music links (`watch`, `playlist`, `channel`)
 
 ## Installation
 
-[<img src="https://github.com/machiav3lli/oandbackupx/blob/034b226cea5c1b30eb4f6a6f313e4dadcbb0ece4/badge_github.png"
-    alt="Get it on GitHub"
-    height="80">](https://github.com/vfsfitvnm/ViMusic/releases/latest)
-[<img src="https://gitlab.com/IzzyOnDroid/repo/-/raw/master/assets/IzzyOnDroid.png"
-     alt="Get it on IzzyOnDroid"
-     height="80">](https://apt.izzysoft.de/fdroid/index/apk/it.vfsfitvnm.vimusic)
-[<img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png"
-     alt="Get it on F-Droid"
-     height="80">](https://f-droid.org/packages/it.vfsfitvnm.vimusic/)
+Grab the latest signed APK from the [Releases](https://github.com/4jeel-cloud/ViMusic-back/releases)
+page and install it (you may need to allow installation from unknown sources).
 
-## Acknowledgments
-- [**YouTube-Internal-Clients**](https://github.com/zerodytrash/YouTube-Internal-Clients): A python script that discovers hidden YouTube API clients. Just a research project.
-- [**ionicons**](https://github.com/ionic-team/ionicons): Premium hand-crafted icons built by Ionic, for Ionic apps and web apps everywhere.
+> **Note:** if Android shows a "built for an older version of Android" / Play Protect
+> warning, tap **Install anyway**. The app targets Android 13 (API 33).
 
-<a href="https://www.flaticon.com/authors/ilham-fitrotul-hayat" title="music icons">App icon based on icon created by Ilham Fitrotul Hayat - Flaticon</a>
+## Building
+
+Requirements: JDK 17 and the Android SDK (platform 33, build-tools 33.0.1).
+
+```bash
+./gradlew :app:assembleRelease
+```
+
+The signed APK is written to `app/build/outputs/apk/release/app-release.apk`.
+Release signing is configured through `keystore.properties` (not committed).
 
 ## Disclaimer
-This project and its contents are not affiliated with, funded, authorized, endorsed by, or in any way associated with YouTube, Google LLC or any of its affiliates and subsidiaries.
 
-Any trademark, service mark, trade name, or other intellectual property rights used in this project are owned by the respective owners.
+This project and its contents are not affiliated with, funded, authorized, endorsed
+by, or in any way associated with YouTube, Google LLC or any of its affiliates and
+subsidiaries.
+
+Any trademark, service mark, trade name, or other intellectual property rights used
+in this project are owned by the respective owners.
+
+## Acknowledgments
+
+- [**ViMusic**](https://github.com/vfsfitvnm/ViMusic): the original project this fork is based on.
+- [**NewPipeExtractor**](https://github.com/TeamNewPipe/NewPipeExtractor): the stream extraction library that powers playback.
+- [**YouTube-Internal-Clients**](https://github.com/zerodytrash/YouTube-Internal-Clients): a research project that documents hidden YouTube API clients.
+- [**ionicons**](https://github.com/ionic-team/ionicons): premium hand-crafted icons built by Ionic.
+
+## License
+
+Licensed under the [GNU General Public License v3.0](./LICENSE).

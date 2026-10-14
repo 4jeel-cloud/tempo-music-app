@@ -39,7 +39,7 @@ fun About() {
     ) {
         Header(title = "About") {
             BasicText(
-                text = "v${BuildConfig.VERSION_NAME} by vfsfitvnm",
+                text = "v${BuildConfig.VERSION_NAME} by 4jeel-cloud",
                 style = typography.s.secondary
             )
         }
@@ -50,7 +50,7 @@ fun About() {
             title = "GitHub",
             text = "View the source code",
             onClick = {
-                uriHandler.openUri("https://github.com/vfsfitvnm/ViMusic")
+                uriHandler.openUri("https://github.com/4jeel-cloud/ViMusic-back")
             }
         )
 
@@ -62,7 +62,7 @@ fun About() {
             title = "Report an issue",
             text = "You will be redirected to GitHub",
             onClick = {
-                uriHandler.openUri("https://github.com/vfsfitvnm/ViMusic/issues/new?assignees=&labels=bug&template=bug_report.yaml")
+                uriHandler.openUri("https://github.com/4jeel-cloud/ViMusic-back/issues/new?assignees=&labels=bug&template=bug_report.yaml")
             }
         )
 
@@ -70,7 +70,7 @@ fun About() {
             title = "Request a feature or suggest an idea",
             text = "You will be redirected to GitHub",
             onClick = {
-                uriHandler.openUri("https://github.com/vfsfitvnm/ViMusic/issues/new?assignees=&labels=enhancement&template=feature_request.yaml")
+                uriHandler.openUri("https://github.com/4jeel-cloud/ViMusic-back/issues/new?assignees=&labels=enhancement&template=feature_request.yaml")
             }
         )
     }

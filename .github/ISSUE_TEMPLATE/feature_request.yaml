@@ -1,0 +1,34 @@
+name: 💡 Feature request
+description: Suggest an idea or a new feature
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## ⚠️ Make sure the feature you are requesting is not already implemented in the [latest version](https://github.com/4jeel-cloud/ViMusic-back/releases/latest).
+        ## ⚠️ Make sure there is no issue requesting the same feature already.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Feature description
+      description: What would you like to be added?
+      placeholder: |
+        Describe your idea...
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Why is this useful?
+      description: Explain how this feature would help you and others.
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-information
+    attributes:
+      label: Additional information
+      placeholder: |
+        Additional details, mockups or attachments.

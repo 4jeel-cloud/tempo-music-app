@@ -166,7 +166,7 @@ fun OtherSettings() {
                             Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
                         )
                     } catch (e: ActivityNotFoundException) {
-                        context.toast("Couldn't find battery optimization settings, please whitelist ViMusic manually")
+                        context.toast("Couldn't find battery optimization settings, please whitelist Tempo manually")
                     }
                 }
             }
