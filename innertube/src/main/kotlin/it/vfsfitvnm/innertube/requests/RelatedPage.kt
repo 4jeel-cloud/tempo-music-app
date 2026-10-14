@@ -20,17 +20,27 @@ suspend fun Innertube.relatedPage(body: NextBody) = runCatchingNonCancellable {
         mask("contents.singleColumnMusicWatchNextResultsRenderer.tabbedRenderer.watchNextTabbedResultsRenderer.tabs.tabRenderer(endpoint,title)")
     }.body<NextResponse>()
 
-    val browseId = nextResponse
+    val tabs = nextResponse
         .contents
         ?.singleColumnMusicWatchNextResultsRenderer
         ?.tabbedRenderer
         ?.watchNextTabbedResultsRenderer
         ?.tabs
-        ?.getOrNull(2)
+
+    // The "Related" tab is no longer at a fixed index (YouTube now inserts
+    // Lyrics/Comments tabs), so locate it by title and fall back to the old index.
+    val browseId = tabs
+        ?.firstOrNull { it.tabRenderer?.title.equals("Related", ignoreCase = true) }
         ?.tabRenderer
         ?.endpoint
         ?.browseEndpoint
         ?.browseId
+        ?: tabs
+            ?.getOrNull(2)
+            ?.tabRenderer
+            ?.endpoint
+            ?.browseEndpoint
+            ?.browseId
         ?: return@runCatchingNonCancellable null
 
     val response = client.post(browse) {

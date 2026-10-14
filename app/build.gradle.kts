@@ -20,8 +20,8 @@ android {
         applicationId = "it.vfsfitvnm.vimusic"
         minSdk = 21
         targetSdk = 33
-        versionCode = 21
-        versionName = "0.5.5"
+        versionCode = 22
+        versionName = "0.5.6"
     }
 
     splits {
@@ -51,8 +51,10 @@ android {
         }
 
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // R8 (full mode) strips reflection-heavy classes that NewPipeExtractor/Rhino/protobuf
+            // need, which makes stream resolution fail silently on-device. Keep them intact.
+            isMinifyEnabled = false
+            isShrinkResources = false
             manifestPlaceholders["appName"] = "ViMusic"
             signingConfig = if (keystorePropertiesFile.exists()) {
                 signingConfigs.getByName("release")
