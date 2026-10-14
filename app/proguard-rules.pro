@@ -22,6 +22,18 @@
 
 -keepattributes RuntimeVisibleAnnotations,AnnotationDefault
 
+# NewPipeExtractor (stream resolution)
+-keep class org.schabi.newpipe.extractor.** { *; }
+-dontwarn org.schabi.newpipe.extractor.**
+-keep class com.grack.nanojson.** { *; }
+-dontwarn com.grack.nanojson.**
+-keep class org.jsoup.** { *; }
+-dontwarn org.jsoup.**
+-keep class javax.annotation.** { *; }
+-dontwarn javax.annotation.**
+# Rhino references desktop-only java.beans; not used on the signature-deciphering path.
+-dontwarn java.beans.**
+
 -dontwarn org.bouncycastle.jsse.BCSSLParameters
 -dontwarn org.bouncycastle.jsse.BCSSLSocket
 -dontwarn org.bouncycastle.jsse.provider.BouncyCastleJsseProvider

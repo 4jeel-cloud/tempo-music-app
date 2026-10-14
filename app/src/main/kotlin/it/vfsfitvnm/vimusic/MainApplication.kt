@@ -4,6 +4,7 @@ import android.app.Application
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
+import it.vfsfitvnm.innertube.NewPipeStreamResolver
 import it.vfsfitvnm.vimusic.enums.CoilDiskCacheMaxSize
 import it.vfsfitvnm.vimusic.utils.coilDiskCacheMaxSizeKey
 import it.vfsfitvnm.vimusic.utils.getEnum
@@ -12,6 +13,7 @@ import it.vfsfitvnm.vimusic.utils.preferences
 class MainApplication : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
+        NewPipeStreamResolver.init()
         DatabaseInitializer()
     }
 

@@ -1,7 +1,16 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     kotlin("android")
     kotlin("kapt")
+}
+
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use(::load)
+    }
 }
 
 android {
@@ -11,8 +20,8 @@ android {
         applicationId = "it.vfsfitvnm.vimusic"
         minSdk = 21
         targetSdk = 33
-        versionCode = 20
-        versionName = "0.5.4"
+        versionCode = 21
+        versionName = "0.5.5"
     }
 
     splits {
@@ -24,6 +33,17 @@ android {
 
     namespace = "it.vfsfitvnm.vimusic"
 
+    signingConfigs {
+        if (keystorePropertiesFile.exists()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
@@ -34,7 +54,11 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             manifestPlaceholders["appName"] = "ViMusic"
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (keystorePropertiesFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

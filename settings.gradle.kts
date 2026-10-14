@@ -49,7 +49,9 @@ dependencyResolutionManagement {
 
             library("palette", "androidx.palette", "palette").version("1.0.0")
 
-            library("desugaring", "com.android.tools", "desugar_jdk_libs").version("1.1.5")
+            // NewPipeExtractor uses java.nio/java.util.Base64, which need the _nio desugar
+            // variant on Android < API 33.
+            library("desugaring", "com.android.tools", "desugar_jdk_libs_nio").version("2.0.4")
         }
 
         create("testLibs") {
