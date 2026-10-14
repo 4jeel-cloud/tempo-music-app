@@ -2,6 +2,7 @@ package it.vfsfitvnm.innertube.utils
 
 import it.vfsfitvnm.innertube.Innertube
 import it.vfsfitvnm.innertube.models.PlaylistPanelVideoRenderer
+import it.vfsfitvnm.innertube.models.largestThumbnail
 
 fun Innertube.SongItem.Companion.from(renderer: PlaylistPanelVideoRenderer): Innertube.SongItem? {
     return Innertube.SongItem(
@@ -27,7 +28,7 @@ fun Innertube.SongItem.Companion.from(renderer: PlaylistPanelVideoRenderer): Inn
         thumbnail = renderer
             .thumbnail
             ?.thumbnails
-            ?.getOrNull(0),
+            ?.largestThumbnail(),
         durationText = renderer
             .lengthText
             ?.text

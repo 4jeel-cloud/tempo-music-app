@@ -77,9 +77,11 @@ val Song.asMediaItem: MediaItem
         .build()
 
 fun String?.thumbnail(size: Int): String? {
+    if (this == null) return null
+    val base = substringBefore("=")
     return when {
-        this?.startsWith("https://lh3.googleusercontent.com") == true -> "$this-w$size-h$size"
-        this?.startsWith("https://yt3.ggpht.com") == true -> "$this-w$size-h$size-s$size"
+        startsWith("https://lh3.googleusercontent.com") -> "$base=w$size-h$size-l90-rj"
+        startsWith("https://yt3.ggpht.com") -> "$base=w$size-h$size"
         else -> this
     }
 }

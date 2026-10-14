@@ -2,6 +2,7 @@ package it.vfsfitvnm.innertube.utils
 
 import it.vfsfitvnm.innertube.Innertube
 import it.vfsfitvnm.innertube.models.MusicTwoRowItemRenderer
+import it.vfsfitvnm.innertube.models.largestThumbnail
 
 fun Innertube.AlbumItem.Companion.from(renderer: MusicTwoRowItemRenderer): Innertube.AlbumItem? {
     return Innertube.AlbumItem(
@@ -21,7 +22,7 @@ fun Innertube.AlbumItem.Companion.from(renderer: MusicTwoRowItemRenderer): Inner
             ?.musicThumbnailRenderer
             ?.thumbnail
             ?.thumbnails
-            ?.firstOrNull()
+            ?.largestThumbnail()
     ).takeIf { it.info?.endpoint?.browseId != null }
 }
 
@@ -42,7 +43,7 @@ fun Innertube.ArtistItem.Companion.from(renderer: MusicTwoRowItemRenderer): Inne
             ?.musicThumbnailRenderer
             ?.thumbnail
             ?.thumbnails
-            ?.firstOrNull()
+            ?.largestThumbnail()
     ).takeIf { it.info?.endpoint?.browseId != null }
 }
 
@@ -71,6 +72,6 @@ fun Innertube.PlaylistItem.Companion.from(renderer: MusicTwoRowItemRenderer): In
             ?.musicThumbnailRenderer
             ?.thumbnail
             ?.thumbnails
-            ?.firstOrNull()
+            ?.largestThumbnail()
     ).takeIf { it.info?.endpoint?.browseId != null }
 }
