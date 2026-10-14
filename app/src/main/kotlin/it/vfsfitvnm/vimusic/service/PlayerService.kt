@@ -101,6 +101,7 @@ import it.vfsfitvnm.vimusic.utils.mediaItems
 import it.vfsfitvnm.vimusic.utils.persistentQueueKey
 import it.vfsfitvnm.vimusic.utils.preferences
 import it.vfsfitvnm.vimusic.utils.queueLoopEnabledKey
+import it.vfsfitvnm.vimusic.utils.registerReceiverCompat
 import it.vfsfitvnm.vimusic.utils.resumePlaybackWhenDeviceConnectedKey
 import it.vfsfitvnm.vimusic.utils.shouldBePlaying
 import it.vfsfitvnm.vimusic.utils.skipSilenceKey
@@ -289,10 +290,10 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
             addAction(Action.previous.value)
         }
 
-        registerReceiver(notificationActionReceiver, filter)
+        registerReceiverCompat(notificationActionReceiver, filter)
 
         isRunning = true
-        registerReceiver(widgetPlaybackReceiver, IntentFilter(WidgetUtils.ACTION_PLAY_TARGET))
+        registerReceiverCompat(widgetPlaybackReceiver, IntentFilter(WidgetUtils.ACTION_PLAY_TARGET))
         widgetProgressJob = widgetScope.launch {
             while (true) {
                 delay(1000)

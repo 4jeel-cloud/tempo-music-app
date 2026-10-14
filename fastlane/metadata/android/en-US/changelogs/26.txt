@@ -1,0 +1,1 @@
+* Fixed a crash on Android 14 and newer where the app closed immediately after launch

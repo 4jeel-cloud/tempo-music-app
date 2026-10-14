@@ -5,12 +5,22 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import android.os.PowerManager
 import android.widget.Toast
 import androidx.core.content.getSystemService
 
 inline fun <reified T> Context.intent(): Intent =
     Intent(this@Context, T::class.java)
+
+fun Context.registerReceiverCompat(receiver: BroadcastReceiver, filter: IntentFilter) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+    } else {
+        registerReceiver(receiver, filter)
+    }
+}
 
 inline fun <reified T : BroadcastReceiver> Context.broadCastPendingIntent(
     requestCode: Int = 0,

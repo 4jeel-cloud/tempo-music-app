@@ -85,7 +85,7 @@ abstract class InvincibleService : Service() {
             if (!isStarted) {
                 isStarted = true
                 handler.postDelayed(this, intervalMs)
-                registerReceiver(this, IntentFilter().apply {
+                registerReceiverCompat(this, IntentFilter().apply {
                     addAction(Intent.ACTION_SCREEN_ON)
                     addAction(Intent.ACTION_SCREEN_OFF)
                 })
