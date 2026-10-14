@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="widget_text_primary">#1C1B1F</color>
+    <color name="widget_text_secondary">#49454F</color>
+    <color name="widget_primary_container">#EADDFF</color>
+    <color name="widget_on_primary_container">#21005D</color>
+    <color name="widget_tertiary_container">#FFD8E4</color>
+    <color name="widget_on_tertiary_container">#31111D</color>
+    <color name="widget_play_button_low_bg">@color/widget_primary_container</color>
+    <color name="widget_play_button_low_icon">@color/widget_on_primary_container</color>
+    <color name="widget_background_color">#E6E1E5</color>
+</resources>

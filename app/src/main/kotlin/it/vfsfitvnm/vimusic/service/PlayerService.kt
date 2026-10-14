@@ -83,6 +83,7 @@ import it.vfsfitvnm.vimusic.utils.RingBuffer
 import it.vfsfitvnm.vimusic.utils.TimerJob
 import it.vfsfitvnm.vimusic.utils.YouTubeRadio
 import it.vfsfitvnm.vimusic.utils.activityPendingIntent
+import it.vfsfitvnm.vimusic.utils.asMediaItem
 import it.vfsfitvnm.vimusic.utils.broadCastPendingIntent
 import it.vfsfitvnm.vimusic.utils.exoPlayerDiskCacheMaxSizeKey
 import it.vfsfitvnm.vimusic.utils.findNextMediaItemById
@@ -106,17 +107,25 @@ import it.vfsfitvnm.vimusic.utils.skipSilenceKey
 import it.vfsfitvnm.vimusic.utils.timer
 import it.vfsfitvnm.vimusic.utils.trackLoopEnabledKey
 import it.vfsfitvnm.vimusic.utils.volumeNormalizationKey
+import it.vfsfitvnm.vimusic.widget.PlaylistWidgetManager
+import it.vfsfitvnm.vimusic.widget.WidgetRefresh
+import it.vfsfitvnm.vimusic.widget.WidgetState
+import it.vfsfitvnm.vimusic.widget.WidgetUtils
 import kotlin.math.roundToInt
 import kotlin.system.exitProcess
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.cancellable
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 @Suppress("DEPRECATION")
 class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListener.Callback,
@@ -169,6 +178,27 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         get() = NotificationId
 
     private lateinit var notificationActionReceiver: NotificationActionReceiver
+
+    private val widgetScope = CoroutineScope(Dispatchers.Main + Job())
+    private var widgetProgressJob: Job? = null
+
+    private val widgetPlaybackReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != WidgetUtils.ACTION_PLAY_TARGET) return
+            val type = intent.getStringExtra(WidgetUtils.EXTRA_TARGET_TYPE) ?: return
+            val id = intent.getStringExtra(WidgetUtils.EXTRA_TARGET_ID) ?: return
+
+            coroutineScope.launch {
+                val songs = PlaylistWidgetManager.resolveTargetSongIds(type, id)
+                if (songs.isEmpty()) return@launch
+                withContext(Dispatchers.Main) {
+                    player.setMediaItems(songs.map { it.asMediaItem }, 0, C.TIME_UNSET)
+                    player.prepare()
+                    player.play()
+                }
+            }
+        }
+    }
 
     override fun onBind(intent: Intent?): AndroidBinder {
         super.onBind(intent)
@@ -261,6 +291,18 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
         registerReceiver(notificationActionReceiver, filter)
 
+        isRunning = true
+        registerReceiver(widgetPlaybackReceiver, IntentFilter(WidgetUtils.ACTION_PLAY_TARGET))
+        widgetProgressJob = widgetScope.launch {
+            while (true) {
+                delay(1000)
+                if (player.isPlaying) {
+                    val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0
+                    WidgetRefresh.updateProgress(this@PlayerService, duration, player.currentPosition)
+                }
+            }
+        }
+
         maybeResumePlaybackWhenDeviceConnected()
     }
 
@@ -281,6 +323,13 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         player.release()
 
         unregisterReceiver(notificationActionReceiver)
+
+        isRunning = false
+        widgetProgressJob?.cancel()
+        widgetScope.cancel()
+        runCatching { unregisterReceiver(widgetPlaybackReceiver) }
+        WidgetState.reset()
+        WidgetUtils.appScope.launch { WidgetRefresh.refresh(applicationContext) }
 
         mediaSession.isActive = false
         mediaSession.release()
@@ -347,6 +396,8 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
             updateMediaSessionQueue(player.currentTimeline)
         }
+
+        updateWidgets()
     }
 
     override fun onTimelineChanged(timeline: Timeline, reason: Int) {
@@ -616,6 +667,31 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                 }
                 notificationManager?.notify(NotificationId, notification)
             }
+
+            updateWidgets()
+        }
+    }
+
+    private fun updateWidgets() {
+        val mediaItem = player.currentMediaItem
+        val title = player.mediaMetadata.title?.toString()
+        if (mediaItem == null || title.isNullOrBlank()) {
+            WidgetState.reset()
+            coroutineScope.launch { WidgetRefresh.updatePlayback(this@PlayerService) }
+            return
+        }
+
+        val artist = player.mediaMetadata.artist?.toString().orEmpty()
+        val artworkUri = player.mediaMetadata.artworkUri?.toString()
+        val isPlaying = player.isPlaying
+        val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0
+        val position = player.currentPosition
+        val songId = mediaItem.mediaId
+
+        coroutineScope.launch {
+            val isLiked = runCatching { Database.likedAt(songId).first() != null }.getOrDefault(false)
+            WidgetState.update(title, artist, artworkUri, isPlaying, isLiked, duration, position, songId)
+            WidgetRefresh.updatePlayback(this@PlayerService)
         }
     }
 
@@ -998,11 +1074,14 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         }
     }
 
-    private companion object {
-        const val NotificationId = 1001
-        const val NotificationChannelId = "default_channel_id"
+    companion object {
+        @Volatile
+        var isRunning = false
 
-        const val SleepTimerNotificationId = 1002
-        const val SleepTimerNotificationChannelId = "sleep_timer_channel_id"
+        private const val NotificationId = 1001
+        private const val NotificationChannelId = "default_channel_id"
+
+        private const val SleepTimerNotificationId = 1002
+        private const val SleepTimerNotificationChannelId = "sleep_timer_channel_id"
     }
 }
