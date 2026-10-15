@@ -1,0 +1,4 @@
+* Albums now refresh their song list when the cached copy is empty
+* The round (turntable) widget now shows sharp artwork up to 4x4
+* The playing queue is now saved and restored by default
+* Updated the app icon and the notification icon

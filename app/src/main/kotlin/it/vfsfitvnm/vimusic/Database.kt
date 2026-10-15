@@ -181,6 +181,9 @@ interface Database {
     @RewriteQueriesToDropUnusedColumns
     fun albumSongs(albumId: String): Flow<List<Song>>
 
+    @Query("SELECT COUNT(*) FROM SongAlbumMap WHERE albumId = :albumId AND position IS NOT NULL")
+    suspend fun albumSongCount(albumId: String): Int
+
     @Query("SELECT * FROM Album WHERE bookmarkedAt IS NOT NULL ORDER BY title ASC")
     fun albumsByTitleAsc(): Flow<List<Album>>
 

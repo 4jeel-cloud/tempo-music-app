@@ -151,5 +151,13 @@
         <meta-data android:name="com.google.android.gms.car.notification.SmallIcon"
             android:resource="@drawable/app_icon" />
 
+        <!-- Exported so the home screen process can load high resolution widget artwork. Only the
+             cacheDir/widget_art directory is exposed by WidgetArtProvider. -->
+        <provider
+            android:name=".widget.WidgetArtProvider"
+            android:authorities="${applicationId}.widgetart"
+            android:exported="true"
+            android:grantUriPermissions="true" />
+
     </application>
 </manifest>

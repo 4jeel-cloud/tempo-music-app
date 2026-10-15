@@ -3,16 +3,27 @@ package it.vfsfitvnm.vimusic.widget
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Bundle
 import android.widget.RemoteViews
 import it.vfsfitvnm.vimusic.R
+import it.vfsfitvnm.vimusic.utils.thumbnail
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 
 object MusicWidgetManager {
+    private const val TURNTABLE_ART_SIZE = 1000
+
     @Volatile private var cachedArtworkUri: String? = null
     @Volatile private var cachedAlbumArt: Bitmap? = null
     @Volatile private var cachedRoundedAlbumArt: Bitmap? = null
-    @Volatile private var cachedCircularAlbumArt: Bitmap? = null
+
+    @Volatile private var cachedTurntableSourceUri: String? = null
+    @Volatile private var cachedTurntableArtUri: Uri? = null
 
     private suspend fun loadAlbumArt(context: Context): Bitmap? {
         val uri = WidgetState.artworkUri
@@ -20,17 +31,68 @@ object MusicWidgetManager {
             cachedArtworkUri = null
             cachedAlbumArt = null
             cachedRoundedAlbumArt = null
-            cachedCircularAlbumArt = null
             return null
         }
         if (uri != cachedArtworkUri || cachedAlbumArt == null) {
             val loaded = WidgetUtils.loadBitmap(context, uri, 300)
             cachedAlbumArt = loaded
             cachedRoundedAlbumArt = loaded?.let { WidgetUtils.getRoundedCornerBitmap(it, 48f) }
-            cachedCircularAlbumArt = loaded?.let { WidgetUtils.getCircularBitmap(it) }
             cachedArtworkUri = if (loaded != null) uri else null
         }
         return cachedAlbumArt
+    }
+
+    /**
+     * Renders the current artwork as a high resolution circular PNG and returns the content Uri that
+     * the home screen can load. This is used by the turntable widget, which can grow to 4x4 and would
+     * otherwise show an upscaled (blurry) low resolution bitmap.
+     */
+    private suspend fun loadTurntableArt(context: Context): Uri? {
+        val sourceUri = WidgetState.artworkUri
+        if (sourceUri == null) {
+            cachedTurntableSourceUri = null
+            cachedTurntableArtUri = null
+            return null
+        }
+        if (sourceUri == cachedTurntableSourceUri && cachedTurntableArtUri != null) {
+            return cachedTurntableArtUri
+        }
+
+        val highRes = sourceUri.thumbnail(TURNTABLE_ART_SIZE) ?: sourceUri
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                val bitmap = WidgetUtils.loadBitmap(context, highRes, TURNTABLE_ART_SIZE)
+                    ?: return@runCatching null
+                val circular = WidgetUtils.getCircularBitmap(bitmap)
+
+                val dir = File(context.cacheDir, WidgetArtProvider.DIR).apply { mkdirs() }
+                val name = "art_${Integer.toHexString(highRes.hashCode())}.png"
+                File(dir, name).outputStream().use { circular.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                dir.listFiles()?.forEach { if (it.name != name) it.delete() }
+
+                WidgetArtProvider.uriFor(context.packageName, name)
+            }.getOrNull()
+        }
+
+        cachedTurntableSourceUri = sourceUri
+        cachedTurntableArtUri = result
+        if (result != null) grantHomeScreenAccess(context, result)
+        return result
+    }
+
+    private fun grantHomeScreenAccess(context: Context, uri: Uri) {
+        val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        context.packageManager
+            .queryIntentActivities(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            .forEach { resolveInfo ->
+                runCatching {
+                    context.grantUriPermission(
+                        resolveInfo.activityInfo.packageName,
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+            }
     }
 
     suspend fun render(context: Context) {
@@ -40,7 +102,7 @@ object MusicWidgetManager {
         val artist = WidgetState.artist.ifEmpty { context.getString(R.string.tap_to_play) }
         val albumArt = loadAlbumArt(context)
         val roundedAlbumArt = if (albumArt != null) cachedRoundedAlbumArt else null
-        val circularAlbumArt = if (albumArt != null) cachedCircularAlbumArt else null
+        val turntableArt = loadTurntableArt(context)
         val isPlaying = WidgetState.isPlaying
         val isLiked = WidgetState.isLiked
         val duration = WidgetState.duration
@@ -59,7 +121,7 @@ object MusicWidgetManager {
             .forEach { widgetId ->
                 appWidgetManager.updateAppWidget(
                     widgetId,
-                    createTurntable(context, circularAlbumArt, isPlaying, isLiked)
+                    createTurntable(context, turntableArt, isPlaying, isLiked)
                 )
             }
     }
@@ -205,14 +267,14 @@ object MusicWidgetManager {
 
     private fun createTurntable(
         context: Context,
-        circularAlbumArt: Bitmap?,
+        artUri: Uri?,
         isPlaying: Boolean,
         @Suppress("UNUSED_PARAMETER") isLiked: Boolean
     ): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.widget_turntable)
 
-        if (circularAlbumArt != null) {
-            views.setImageViewBitmap(R.id.widget_turntable_album_art, circularAlbumArt)
+        if (artUri != null) {
+            views.setImageViewUri(R.id.widget_turntable_album_art, artUri)
         } else {
             views.setImageViewBitmap(R.id.widget_turntable_album_art, WidgetUtils.getCircularDefaultIcon(context))
         }

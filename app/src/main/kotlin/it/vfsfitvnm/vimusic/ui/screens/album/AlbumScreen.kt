@@ -67,7 +67,13 @@ fun AlbumScreen(browseId: String) {
             .collect { (currentAlbum, tabIndex) ->
                 album = currentAlbum
 
-                if (albumPage == null && (currentAlbum?.timestamp == null || tabIndex == 1)) {
+                // An album can be cached in the database with no songs when it was first opened
+                // while the parser could not read the (changed) album layout; refetch those so the
+                // tracks and title populate instead of showing "Unknown".
+                val isCachedWithoutSongs =
+                    currentAlbum != null && Database.albumSongCount(browseId) == 0
+
+                if (albumPage == null && (currentAlbum?.timestamp == null || tabIndex == 1 || isCachedWithoutSongs)) {
                     withContext(Dispatchers.IO) {
                         Innertube.albumPage(BrowseBody(browseId = browseId))
                             ?.onSuccess { currentAlbumPage ->
