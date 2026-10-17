@@ -157,13 +157,33 @@ fun Thumbnail(
             PlaybackError(
                 isDisplayed = error != null,
                 messageProvider = {
-                    when (error?.cause?.cause) {
-                        is UnresolvedAddressException, is UnknownHostException -> "A network error has occurred"
-                        is PlayableFormatNotFoundException -> "Couldn't find a playable audio format"
-                        is UnplayableException -> "The original video source of this song has been deleted"
-                        is LoginRequiredException -> "This song cannot be played due to server restrictions"
-                        is VideoIdMismatchException -> "The returned video id doesn't match the requested one"
-                        else -> "An unknown playback error has occurred"
+                    val chain = generateSequence(error as Throwable?) { it.cause }.toList()
+                    when {
+                        chain.any { it is UnresolvedAddressException || it is UnknownHostException } ->
+                            "A network error has occurred"
+                        chain.any { it is PlayableFormatNotFoundException } ->
+                            "Couldn't find a playable audio format"
+                        chain.any { it is UnplayableException } ->
+                            "The original video source of this song has been deleted"
+                        chain.any { it is LoginRequiredException } ->
+                            "This song cannot be played due to server restrictions"
+                        chain.any { it is VideoIdMismatchException } ->
+                            "The returned video id doesn't match the requested one"
+                        else -> {
+                            val serverStatus = chain
+                                .filterIsInstance<PlaybackException>()
+                                .mapNotNull { it.errorCodeName }
+                                .firstOrNull { it != "ERROR_CODE_REMOTE_ERROR" && it != "ERROR_CODE_UNSPECIFIED" }
+                            val deepest = chain.lastOrNull { it !is PlaybackException && it.message != null }
+
+                            when {
+                                deepest != null ->
+                                    "Playback failed: ${deepest.javaClass.simpleName}: ${deepest.message?.take(160)}"
+                                serverStatus != null ->
+                                    "Playback error: $serverStatus"
+                                else -> "An unknown playback error has occurred"
+                            }
+                        }
                     }
                 },
                 onDismiss = player::prepare

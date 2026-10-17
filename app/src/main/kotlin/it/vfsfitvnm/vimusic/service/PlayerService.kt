@@ -28,6 +28,7 @@ import android.net.Uri
 import android.os.Handler
 import android.text.format.DateUtils
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.app.NotificationCompat
@@ -43,10 +44,12 @@ import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.CacheWriter
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
@@ -975,6 +978,80 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
         var isLoadingRadio by mutableStateOf(false)
             private set
+
+        val downloadingIds = mutableStateListOf<String>()
+
+        fun isDownloaded(songId: String, contentLength: Long?): Boolean =
+            contentLength != null && cache.isCached(songId, 0, contentLength)
+
+        fun download(mediaItem: MediaItem, contentLength: Long?) {
+            val songId = mediaItem.mediaId
+
+            if (downloadingIds.contains(songId) || isDownloaded(songId, contentLength)) return
+
+            downloadingIds.add(songId)
+
+            coroutineScope.launch {
+                try {
+                    AppLog.d("Download", "Downloading $songId")
+
+                    val response = Innertube.player(PlayerBody(videoId = songId))?.getOrThrow()
+                        ?: throw IllegalStateException("No player response for $songId")
+
+                    val format = response.streamingData?.highestQualityFormat
+                        ?: throw IllegalStateException("No playable format for $songId")
+
+                    val url = format.url
+                        ?: throw IllegalStateException("No stream url for $songId")
+
+                    query {
+                        Database.insert(
+                            it.vfsfitvnm.vimusic.models.Format(
+                                songId = songId,
+                                itag = format.itag,
+                                mimeType = format.mimeType,
+                                bitrate = format.bitrate,
+                                loudnessDb = response.playerConfig?.audioConfig?.normalizedLoudnessDb,
+                                contentLength = format.contentLength,
+                                lastModified = format.lastModified
+                            )
+                        )
+                    }
+
+                    val dataSource = CacheDataSource.Factory()
+                        .setCache(cache)
+                        .setUpstreamDataSourceFactory(
+                            DefaultHttpDataSource.Factory()
+                                .setConnectTimeoutMs(16000)
+                                .setReadTimeoutMs(8000)
+                                .setUserAgent("Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0")
+                        )
+                        .createDataSource()
+
+                    CacheWriter(
+                        dataSource,
+                        DataSpec(
+                            url.toUri(),
+                            0L,
+                            C.LENGTH_UNSET.toLong(),
+                            songId
+                        ),
+                        null,
+                        null
+                    ).cache()
+
+                    AppLog.i("Download", "Downloaded $songId")
+                } catch (t: Throwable) {
+                    AppLog.e("Download", "Failed to download $songId", t)
+                } finally {
+                    downloadingIds.remove(songId)
+                }
+            }
+        }
+
+        fun removeDownload(songId: String) {
+            cache.removeResource(songId)
+        }
 
         fun setBitmapListener(listener: ((Bitmap?) -> Unit)?) {
             bitmapProvider.listener = listener

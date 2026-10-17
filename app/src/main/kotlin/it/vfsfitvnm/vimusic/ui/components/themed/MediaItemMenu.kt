@@ -269,6 +269,7 @@ fun MediaItemMenu(
 ) {
     val (colorPalette) = LocalAppearance.current
     val density = LocalDensity.current
+    val binder = LocalPlayerServiceBinder.current
 
     var isViewingPlaylists by remember {
         mutableStateOf(false)
@@ -300,6 +301,10 @@ fun MediaItemMenu(
         mutableStateOf<Long?>(null)
     }
 
+    var downloadedContentLength by remember {
+        mutableStateOf<Long?>(null)
+    }
+
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             if (albumInfo == null) albumInfo = Database.songAlbumInfo(mediaItem.mediaId)
@@ -308,6 +313,15 @@ fun MediaItemMenu(
             Database.likedAt(mediaItem.mediaId).collect { likedAt = it }
         }
     }
+
+    LaunchedEffect(mediaItem.mediaId) {
+        withContext(Dispatchers.IO) {
+            Database.format(mediaItem.mediaId).collect { downloadedContentLength = it?.contentLength }
+        }
+    }
+
+    val isDownloading = binder?.downloadingIds?.contains(mediaItem.mediaId) == true
+    val isDownloaded = binder?.isDownloaded(mediaItem.mediaId, downloadedContentLength) == true
 
     AnimatedContent(
         targetState = isViewingPlaylists,
@@ -490,6 +504,25 @@ fun MediaItemMenu(
                         onClick = {
                             onDismiss()
                             onEnqueue()
+                        }
+                    )
+                }
+
+                binder?.let { binder ->
+                    MenuEntry(
+                        icon = if (isDownloaded) R.drawable.checkmark else R.drawable.download,
+                        text = when {
+                            isDownloading -> "Downloading…"
+                            isDownloaded -> "Remove download"
+                            else -> "Download for offline"
+                        },
+                        onClick = {
+                            onDismiss()
+                            if (isDownloaded) {
+                                binder.removeDownload(mediaItem.mediaId)
+                            } else {
+                                binder.download(mediaItem, downloadedContentLength)
+                            }
                         }
                     )
                 }
