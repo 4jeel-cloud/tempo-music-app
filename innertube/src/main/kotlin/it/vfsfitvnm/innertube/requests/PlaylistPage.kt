@@ -126,7 +126,13 @@ suspend fun Innertube.playlistPage(body: BrowseBody) = runCatchingNonCancellable
 suspend fun Innertube.playlistPage(body: ContinuationBody) = runCatchingNonCancellable {
     val response = client.post(browse) {
         setBody(body)
-        mask("continuationContents.musicPlaylistShelfContinuation(continuations,contents.$musicResponsiveListItemRendererMask)")
+        // Playlists answer with musicPlaylistShelfContinuation while albums answer with
+        // musicShelfContinuation; request both so the mask never filters the payload to null.
+        mask(
+            "continuationContents(" +
+                "musicPlaylistShelfContinuation(continuations,contents.$musicResponsiveListItemRendererMask)," +
+                "musicShelfContinuation(continuations,contents.$musicResponsiveListItemRendererMask))"
+        )
     }.body<ContinuationResponse>()
 
     response

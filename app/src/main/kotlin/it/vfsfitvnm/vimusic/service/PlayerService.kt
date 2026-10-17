@@ -110,6 +110,7 @@ import it.vfsfitvnm.vimusic.utils.resumePlaybackWhenDeviceConnectedKey
 import it.vfsfitvnm.vimusic.utils.shouldBePlaying
 import it.vfsfitvnm.vimusic.utils.skipSilenceKey
 import it.vfsfitvnm.vimusic.utils.timer
+import it.vfsfitvnm.vimusic.utils.toast
 import it.vfsfitvnm.vimusic.utils.trackLoopEnabledKey
 import it.vfsfitvnm.vimusic.utils.volumeNormalizationKey
 import it.vfsfitvnm.vimusic.widget.PlaylistWidgetManager
@@ -1004,20 +1005,6 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                     val url = format.url
                         ?: throw IllegalStateException("No stream url for $songId")
 
-                    query {
-                        Database.insert(
-                            it.vfsfitvnm.vimusic.models.Format(
-                                songId = songId,
-                                itag = format.itag,
-                                mimeType = format.mimeType,
-                                bitrate = format.bitrate,
-                                loudnessDb = response.playerConfig?.audioConfig?.normalizedLoudnessDb,
-                                contentLength = format.contentLength,
-                                lastModified = format.lastModified
-                            )
-                        )
-                    }
-
                     val dataSource = CacheDataSource.Factory()
                         .setCache(cache)
                         .setUpstreamDataSourceFactory(
@@ -1040,9 +1027,33 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                         null
                     ).cache()
 
-                    AppLog.i("Download", "Downloaded $songId")
+                    // NewPipe does not expose a content length, so record the size we actually
+                    // cached; the Offline list compares it against cache.isCached().
+                    val cachedLength = runCatching {
+                        cache.getCachedBytes(songId, 0, Long.MAX_VALUE).takeIf { it > 0 }
+                    }.getOrNull() ?: format.contentLength
+
+                    query {
+                        Database.insert(mediaItem)
+
+                        Database.insert(
+                            it.vfsfitvnm.vimusic.models.Format(
+                                songId = songId,
+                                itag = format.itag,
+                                mimeType = format.mimeType,
+                                bitrate = format.bitrate,
+                                loudnessDb = response.playerConfig?.audioConfig?.normalizedLoudnessDb,
+                                contentLength = cachedLength,
+                                lastModified = format.lastModified
+                            )
+                        )
+                    }
+
+                    AppLog.i("Download", "Downloaded $songId ($cachedLength bytes)")
+                    withContext(Dispatchers.Main) { toast("Saved to Offline") }
                 } catch (t: Throwable) {
                     AppLog.e("Download", "Failed to download $songId", t)
+                    withContext(Dispatchers.Main) { toast("Download failed: ${t.message}") }
                 } finally {
                     downloadingIds.remove(songId)
                 }

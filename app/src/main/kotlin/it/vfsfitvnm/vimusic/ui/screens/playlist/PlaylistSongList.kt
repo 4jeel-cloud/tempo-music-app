@@ -12,9 +12,11 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import com.valentinilk.shimmer.shimmer
 import it.vfsfitvnm.compose.persist.persist
 import it.vfsfitvnm.innertube.Innertube
@@ -53,12 +56,15 @@ import it.vfsfitvnm.vimusic.ui.items.SongItemPlaceholder
 import it.vfsfitvnm.vimusic.ui.styling.Dimensions
 import it.vfsfitvnm.vimusic.ui.styling.LocalAppearance
 import it.vfsfitvnm.vimusic.ui.styling.px
+import it.vfsfitvnm.vimusic.utils.AppLog
 import it.vfsfitvnm.vimusic.utils.asMediaItem
+import it.vfsfitvnm.vimusic.utils.center
 import it.vfsfitvnm.vimusic.utils.completed
 import it.vfsfitvnm.vimusic.utils.enqueue
 import it.vfsfitvnm.vimusic.utils.forcePlayAtIndex
 import it.vfsfitvnm.vimusic.utils.forcePlayFromBeginning
 import it.vfsfitvnm.vimusic.utils.isLandscape
+import it.vfsfitvnm.vimusic.utils.secondary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -75,11 +81,29 @@ fun PlaylistSongList(
 
     var playlistPage by persist<Innertube.PlaylistOrAlbumPage?>("playlist/$browseId/playlistPage")
 
+    var isLoadFailed by rememberSaveable {
+        mutableStateOf(false)
+    }
+
     LaunchedEffect(Unit) {
         if (playlistPage != null && playlistPage?.songsPage?.continuation == null) return@LaunchedEffect
 
-        playlistPage = withContext(Dispatchers.IO) {
-            Innertube.playlistPage(BrowseBody(browseId = browseId))?.completed()?.getOrNull()
+        val result = withContext(Dispatchers.IO) {
+            runCatching { Innertube.playlistPage(BrowseBody(browseId = browseId))?.completed() }
+        }
+
+        val page = result.getOrNull()?.getOrNull()
+
+        if (page != null) {
+            isLoadFailed = false
+            playlistPage = page
+        } else {
+            isLoadFailed = true
+            AppLog.e(
+                "Playlist",
+                "Failed to load playlist $browseId",
+                result.exceptionOrNull() ?: result.getOrNull()?.exceptionOrNull()
+            )
         }
     }
 
@@ -214,13 +238,30 @@ fun PlaylistSongList(
                 }
 
                 if (playlistPage == null) {
-                    item(key = "loading") {
-                        ShimmerHost(
-                            modifier = Modifier
-                                .fillParentMaxSize()
-                        ) {
-                            repeat(4) {
-                                SongItemPlaceholder(thumbnailSizeDp = songThumbnailSizeDp)
+                    item(key = if (isLoadFailed) "error" else "loading") {
+                        if (isLoadFailed) {
+                            val (_, typography) = LocalAppearance.current
+
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .fillParentMaxSize()
+                            ) {
+                                BasicText(
+                                    text = "Couldn't load this playlist.\nCheck your connection and go back to retry.",
+                                    style = typography.s.secondary.center,
+                                    modifier = Modifier
+                                        .padding(all = 16.dp)
+                                )
+                            }
+                        } else {
+                            ShimmerHost(
+                                modifier = Modifier
+                                    .fillParentMaxSize()
+                            ) {
+                                repeat(4) {
+                                    SongItemPlaceholder(thumbnailSizeDp = songThumbnailSizeDp)
+                                }
                             }
                         }
                     }

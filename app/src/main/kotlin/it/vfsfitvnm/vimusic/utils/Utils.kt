@@ -101,15 +101,35 @@ fun formatAsDuration(millis: Long) = DateUtils.formatElapsedTime(millis / 1000).
 suspend fun Result<Innertube.PlaylistOrAlbumPage>.completed(): Result<Innertube.PlaylistOrAlbumPage>? {
     var playlistPage = getOrNull() ?: return null
 
-    while (playlistPage.songsPage?.continuation != null) {
-        val continuation = playlistPage.songsPage?.continuation!!
-        val otherPlaylistPageResult = Innertube.playlistPage(ContinuationBody(continuation = continuation)) ?: break
+    var continuation = playlistPage.songsPage?.continuation
+    var iterations = 0
 
-        if (otherPlaylistPageResult.isFailure) break
+    // A continuation response that yields no new songs but a repeated (or null) continuation
+    // used to leave the state unchanged and spin here forever, so bound every exit.
+    while (continuation != null && iterations < 50) {
+        iterations++
 
-        otherPlaylistPageResult.getOrNull()?.let { otherSongsPage ->
-            playlistPage = playlistPage.copy(songsPage = playlistPage.songsPage + otherSongsPage)
+        val otherPlaylistPageResult =
+            Innertube.playlistPage(ContinuationBody(continuation = continuation)) ?: break
+
+        val otherSongsPage = otherPlaylistPageResult.getOrNull()
+
+        if (otherSongsPage == null) {
+            AppLog.w("Playlist", "Continuation fetch failed at page $iterations; showing partial list")
+            break
         }
+
+        playlistPage = playlistPage.copy(songsPage = playlistPage.songsPage + otherSongsPage)
+
+        val nextContinuation = otherSongsPage.continuation
+        if (nextContinuation == null || nextContinuation == continuation) {
+            if (nextContinuation == continuation) {
+                AppLog.w("Playlist", "Continuation did not advance at page $iterations; stopping")
+            }
+            break
+        }
+
+        continuation = nextContinuation
     }
 
     return Result.success(playlistPage)

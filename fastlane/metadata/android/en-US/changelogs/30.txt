@@ -1,0 +1,3 @@
+* Downloaded songs now actually show up in the Offline playlist
+* Fixed playlist and album pages that could reload forever instead of loading
+* The screen now reports an error instead of spinning when a playlist fails to load
