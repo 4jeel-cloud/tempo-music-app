@@ -33,13 +33,29 @@ object NewPipeStreamResolver {
 
             // PlayerResponse.highestQualityFormat only recognises itag 251 (opus) and 140 (m4a),
             // so restrict to those; otherwise the rest of the app would ignore our stream.
-            val (stream, url) = info.audioStreams
+            val candidate = info.audioStreams
                 .filter { it.itag == 251 || it.itag == 140 }
                 .mapNotNull { stream ->
                     runCatching { stream.url }.getOrNull()?.let { url -> stream to url }
                 }
                 .maxByOrNull { it.first.bestBitrate }
-                ?: return@runCatching null
+
+            if (candidate == null) {
+                InnertubeLog.error(
+                    "NewPipe",
+                    "No playable audio stream (itag 251/140) for $videoId; available itags=" +
+                        info.audioStreams.map { it.itag },
+                    null
+                )
+                return@runCatching null
+            }
+
+            val (stream, url) = candidate
+
+            InnertubeLog.info(
+                "NewPipe",
+                "Resolved $videoId itag=${stream.itag} bitrate=${stream.bitrate} url=${url.substringBefore('?')}"
+            )
 
             PlayerResponse(
                 playabilityStatus = PlayerResponse.PlayabilityStatus("OK"),
@@ -63,6 +79,8 @@ object NewPipeStreamResolver {
                 ),
                 videoDetails = PlayerResponse.VideoDetails(videoId)
             )
+        }.onFailure { throwable ->
+            InnertubeLog.error("NewPipe", "Resolution failed for $videoId", throwable)
         }.getOrNull()
     }
 

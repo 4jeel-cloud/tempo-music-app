@@ -78,6 +78,7 @@ import it.vfsfitvnm.vimusic.enums.ExoPlayerDiskCacheMaxSize
 import it.vfsfitvnm.vimusic.models.Event
 import it.vfsfitvnm.vimusic.models.QueuedMediaItem
 import it.vfsfitvnm.vimusic.query
+import it.vfsfitvnm.vimusic.utils.AppLog
 import it.vfsfitvnm.vimusic.utils.InvincibleService
 import it.vfsfitvnm.vimusic.utils.RingBuffer
 import it.vfsfitvnm.vimusic.utils.TimerJob
@@ -407,6 +408,15 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) {
             updateMediaSessionQueue(timeline)
         }
+    }
+
+    override fun onPlayerError(error: PlaybackException) {
+        val mediaId = runCatching { player.currentMediaItem?.mediaId }.getOrNull()
+        AppLog.e(
+            "ExoPlayer",
+            "Playback error (code=${error.errorCodeName}) for mediaId=$mediaId: ${error.message}",
+            error
+        )
     }
 
     private fun updateMediaSessionQueue(timeline: Timeline) {
@@ -841,6 +851,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                     ringBuffer.getOrNull(0)?.first -> dataSpec.withUri(ringBuffer.getOrNull(0)!!.second)
                     ringBuffer.getOrNull(1)?.first -> dataSpec.withUri(ringBuffer.getOrNull(1)!!.second)
                     else -> {
+                        AppLog.d("Player", "Resolving stream for $videoId")
                         val urlResult = runBlocking(Dispatchers.IO) {
                             Innertube.player(PlayerBody(videoId = videoId))
                         }?.mapCatching { body ->

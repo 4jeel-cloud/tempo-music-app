@@ -1,0 +1,3 @@
+* Added a "Share logs" option (Settings > About) to help diagnose playback problems
+* Added detailed logging for stream resolution and playback errors
+* Captures the last crash to include in the log report

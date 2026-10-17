@@ -7,6 +7,7 @@ import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import it.vfsfitvnm.innertube.Innertube
+import it.vfsfitvnm.innertube.InnertubeLog
 import it.vfsfitvnm.innertube.NewPipeStreamResolver
 import it.vfsfitvnm.innertube.models.Context
 import it.vfsfitvnm.innertube.models.PlayerResponse
@@ -21,7 +22,14 @@ import kotlinx.serialization.Serializable
  * playable URLs. If it fails, the old InnerTube path is used as a best-effort fallback.
  */
 suspend fun Innertube.player(body: PlayerBody): Result<PlayerResponse>? {
-    NewPipeStreamResolver.resolve(body.videoId)?.let { return Result.success(it) }
+    NewPipeStreamResolver.resolve(body.videoId)?.let {
+        return Result.success(it)
+    }
+    InnertubeLog.error(
+        "Player",
+        "NewPipe returned no stream for ${body.videoId}; falling back to InnerTube",
+        null
+    )
     return playerFromInnerTube(body)
 }
 
@@ -30,6 +38,11 @@ private suspend fun Innertube.playerFromInnerTube(body: PlayerBody) = runCatchin
         setBody(body)
         mask("playabilityStatus.status,playerConfig.audioConfig,streamingData.adaptiveFormats,videoDetails.videoId")
     }.body<PlayerResponse>()
+
+    InnertubeLog.info(
+        "Player",
+        "InnerTube status for ${body.videoId} = ${response.playabilityStatus?.status}"
+    )
 
     if (response.playabilityStatus?.status == "OK") {
         response
@@ -59,12 +72,21 @@ private suspend fun Innertube.playerFromInnerTube(body: PlayerBody) = runCatchin
         }.body<PlayerResponse>()
 
         if (safePlayerResponse.playabilityStatus?.status != "OK") {
+            InnertubeLog.error(
+                "Player",
+                "Age-restriction fallback status for ${body.videoId} = ${safePlayerResponse.playabilityStatus?.status}",
+                null
+            )
             return@runCatchingNonCancellable response
         }
 
-        val audioStreams = client.get("https://watchapi.whatever.social/streams/${body.videoId}") {
-            contentType(ContentType.Application.Json)
-        }.body<PipedResponse>().audioStreams
+        val audioStreams = runCatching {
+            client.get("https://watchapi.whatever.social/streams/${body.videoId}") {
+                contentType(ContentType.Application.Json)
+            }.body<PipedResponse>().audioStreams
+        }.onFailure { throwable ->
+            InnertubeLog.error("Player", "Piped (whatever.social) lookup failed for ${body.videoId}", throwable)
+        }.getOrElse { emptyList() }
 
         safePlayerResponse.copy(
             streamingData = safePlayerResponse.streamingData?.copy(

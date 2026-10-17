@@ -13,18 +13,23 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import android.content.Intent
 import it.vfsfitvnm.vimusic.BuildConfig
 import it.vfsfitvnm.vimusic.LocalPlayerAwareWindowInsets
 import it.vfsfitvnm.vimusic.ui.components.themed.Header
 import it.vfsfitvnm.vimusic.ui.styling.LocalAppearance
+import it.vfsfitvnm.vimusic.utils.AppLog
 import it.vfsfitvnm.vimusic.utils.secondary
+import it.vfsfitvnm.vimusic.utils.toast
 
 @ExperimentalAnimationApi
 @Composable
 fun About() {
     val (colorPalette, typography) = LocalAppearance.current
     val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier
@@ -57,6 +62,28 @@ fun About() {
         SettingsGroupSpacer()
 
         SettingsEntryGroupText(title = "TROUBLESHOOTING")
+
+        SettingsEntry(
+            title = "Share logs",
+            text = "Attach recent diagnostics to a report",
+            onClick = {
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_SUBJECT, "Tempo logs (v${BuildConfig.VERSION_NAME})")
+                    putExtra(Intent.EXTRA_TEXT, AppLog.buildReport())
+                }
+                context.startActivity(Intent.createChooser(intent, "Share logs"))
+            }
+        )
+
+        SettingsEntry(
+            title = "Clear logs",
+            text = "Delete the in-app diagnostic buffer",
+            onClick = {
+                AppLog.clear()
+                context.toast("Logs cleared")
+            }
+        )
 
         SettingsEntry(
             title = "Report an issue",
