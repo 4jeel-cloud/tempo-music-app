@@ -393,6 +393,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
         streamUrlRetries = 0
+        AppLog.d("Player", "Now on ${mediaItem?.mediaId} (transition reason=$reason)")
         maybeRecoverPlaybackError()
         maybeNormalizeVolume()
         maybeProcessRadio()
