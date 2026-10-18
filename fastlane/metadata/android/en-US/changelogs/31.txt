@@ -1,0 +1,3 @@
+* Fixed songs dying part way through with "response code 403"
+* Stream links are now re-fetched when they expire instead of being reused
+* The log report now records the stream host and link expiry for each song

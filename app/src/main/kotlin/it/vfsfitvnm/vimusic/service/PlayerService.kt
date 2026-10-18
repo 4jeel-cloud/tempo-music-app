@@ -46,6 +46,7 @@ import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
@@ -391,6 +392,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
     }
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+        streamUrlRetries = 0
         maybeRecoverPlaybackError()
         maybeNormalizeVolume()
         maybeProcessRadio()
@@ -416,11 +418,40 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
     override fun onPlayerError(error: PlaybackException) {
         val mediaId = runCatching { player.currentMediaItem?.mediaId }.getOrNull()
+        val httpCode = generateSequence<Throwable>(error) { it.cause }
+            .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
+            .firstOrNull()
+            ?.responseCode
+
         AppLog.e(
             "ExoPlayer",
-            "Playback error (code=${error.errorCodeName}) for mediaId=$mediaId: ${error.message}",
+            "Playback error (code=${error.errorCodeName}, http=$httpCode) for mediaId=$mediaId: ${error.message}",
             error
         )
+
+        // Googlevideo links carry an "expire" timestamp and are tied to the address they were
+        // issued for, so a url kept in the resolver can go stale part way through a track.
+        // Re-resolve and resume instead of dropping the song on a 403.
+        if (httpCode !in StreamRetryHttpStatus || mediaId == null) return
+
+        if (streamUrlRetries >= MaxStreamUrlRetries) {
+            AppLog.e(
+                "Player",
+                "Giving up on $mediaId after $streamUrlRetries stream retries (HTTP $httpCode)"
+            )
+            return
+        }
+
+        streamUrlRetries++
+
+        AppLog.w(
+            "Player",
+            "HTTP $httpCode for $mediaId; discarding cached stream url and retrying " +
+                "($streamUrlRetries/$MaxStreamUrlRetries)"
+        )
+
+        streamRingBuffer.clear()
+        player.prepare()
     }
 
     private fun updateMediaSessionQueue(timeline: Timeline) {
@@ -830,6 +861,30 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         }
     }
 
+    // The resolver answers every 512KB miss for a song from this buffer, so an expired or
+    // revoked googlevideo url would otherwise keep being reused until the track dies with a 403.
+    private val streamRingBuffer = RingBuffer<ResolvedStream?>(2) { null }
+
+    private var streamUrlRetries = 0
+
+    private data class ResolvedStream(
+        val videoId: String,
+        val url: Uri,
+        val resolvedAtMs: Long
+    )
+
+    private fun ResolvedStream.isFresh(nowMs: Long = System.currentTimeMillis()): Boolean {
+        val expireAtMs = url.getQueryParameter("expire")?.toLongOrNull()?.times(1000L)
+
+        if (expireAtMs != null && expireAtMs > 0) {
+            // A minute of slack so the url cannot expire mid transfer.
+            return nowMs < expireAtMs - 60_000
+        }
+
+        // No expiry advertised: only trust it for the length of a listening session.
+        return nowMs - resolvedAtMs < StreamUrlMaxAgeMs
+    }
+
     private fun createCacheDataSource(): DataSource.Factory {
         return CacheDataSource.Factory().setCache(cache).apply {
             setUpstreamDataSourceFactory(
@@ -843,7 +898,6 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
     private fun createDataSourceFactory(): DataSource.Factory {
         val chunkLength = 512 * 1024L
-        val ringBuffer = RingBuffer<Pair<String, Uri>?>(2) { null }
 
         return ResolvingDataSource.Factory(createCacheDataSource()) { dataSpec ->
             val videoId = dataSpec.key ?: error("A key must be set")
@@ -851,75 +905,90 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
             if (cache.isCached(videoId, dataSpec.position, chunkLength)) {
                 dataSpec
             } else {
-                when (videoId) {
-                    ringBuffer.getOrNull(0)?.first -> dataSpec.withUri(ringBuffer.getOrNull(0)!!.second)
-                    ringBuffer.getOrNull(1)?.first -> dataSpec.withUri(ringBuffer.getOrNull(1)!!.second)
-                    else -> {
-                        AppLog.d("Player", "Resolving stream for $videoId")
-                        val urlResult = runBlocking(Dispatchers.IO) {
-                            Innertube.player(PlayerBody(videoId = videoId))
-                        }?.mapCatching { body ->
-                            if (body.videoDetails?.videoId != videoId) {
-                                throw VideoIdMismatchException()
-                            }
+                val reusable = streamRingBuffer.firstOrNull {
+                    it != null && it.videoId == videoId && it.isFresh()
+                }
 
-                            when (val status = body.playabilityStatus?.status) {
-                                "OK" -> body.streamingData?.highestQualityFormat?.let { format ->
-                                    val mediaItem = runBlocking(Dispatchers.Main) {
-                                        player.findNextMediaItemById(videoId)
-                                    }
-
-                                    if (mediaItem?.mediaMetadata?.extras?.getString("durationText") == null) {
-                                        format.approxDurationMs?.div(1000)
-                                            ?.let(DateUtils::formatElapsedTime)?.removePrefix("0")
-                                            ?.let { durationText ->
-                                                mediaItem?.mediaMetadata?.extras?.putString(
-                                                    "durationText",
-                                                    durationText
-                                                )
-                                                Database.updateDurationText(videoId, durationText)
-                                            }
-                                    }
-
-                                    query {
-                                        mediaItem?.let(Database::insert)
-
-                                        Database.insert(
-                                            it.vfsfitvnm.vimusic.models.Format(
-                                                songId = videoId,
-                                                itag = format.itag,
-                                                mimeType = format.mimeType,
-                                                bitrate = format.bitrate,
-                                                loudnessDb = body.playerConfig?.audioConfig?.normalizedLoudnessDb,
-                                                contentLength = format.contentLength,
-                                                lastModified = format.lastModified
-                                            )
-                                        )
-                                    }
-
-                                    format.url
-                                } ?: throw PlayableFormatNotFoundException()
-
-                                "UNPLAYABLE" -> throw UnplayableException()
-                                "LOGIN_REQUIRED" -> throw LoginRequiredException()
-                                else -> throw PlaybackException(
-                                    status,
-                                    null,
-                                    PlaybackException.ERROR_CODE_REMOTE_ERROR
-                                )
-                            }
+                if (reusable != null) {
+                    dataSpec.withUri(reusable.url)
+                } else {
+                    AppLog.d("Player", "Resolving stream for $videoId")
+                    val urlResult = runBlocking(Dispatchers.IO) {
+                        Innertube.player(PlayerBody(videoId = videoId))
+                    }?.mapCatching { body ->
+                        if (body.videoDetails?.videoId != videoId) {
+                            throw VideoIdMismatchException()
                         }
 
-                        urlResult?.getOrThrow()?.let { url ->
-                            ringBuffer.append(videoId to url.toUri())
-                            dataSpec.withUri(url.toUri())
-                                .subrange(dataSpec.uriPositionOffset, chunkLength)
-                        } ?: throw PlaybackException(
-                            null,
-                            urlResult?.exceptionOrNull(),
-                            PlaybackException.ERROR_CODE_REMOTE_ERROR
-                        )
+                        when (val status = body.playabilityStatus?.status) {
+                            "OK" -> body.streamingData?.highestQualityFormat?.let { format ->
+                                val mediaItem = runBlocking(Dispatchers.Main) {
+                                    player.findNextMediaItemById(videoId)
+                                }
+
+                                if (mediaItem?.mediaMetadata?.extras?.getString("durationText") == null) {
+                                    format.approxDurationMs?.div(1000)
+                                        ?.let(DateUtils::formatElapsedTime)?.removePrefix("0")
+                                        ?.let { durationText ->
+                                            mediaItem?.mediaMetadata?.extras?.putString(
+                                                "durationText",
+                                                durationText
+                                            )
+                                            Database.updateDurationText(videoId, durationText)
+                                        }
+                                }
+
+                                query {
+                                    mediaItem?.let(Database::insert)
+
+                                    Database.insert(
+                                        it.vfsfitvnm.vimusic.models.Format(
+                                            songId = videoId,
+                                            itag = format.itag,
+                                            mimeType = format.mimeType,
+                                            bitrate = format.bitrate,
+                                            loudnessDb = body.playerConfig?.audioConfig?.normalizedLoudnessDb,
+                                            contentLength = format.contentLength,
+                                            lastModified = format.lastModified
+                                        )
+                                    )
+                                }
+
+                                format.url
+                            } ?: throw PlayableFormatNotFoundException()
+
+                            "UNPLAYABLE" -> throw UnplayableException()
+                            "LOGIN_REQUIRED" -> throw LoginRequiredException()
+                            else -> throw PlaybackException(
+                                status,
+                                null,
+                                PlaybackException.ERROR_CODE_REMOTE_ERROR
+                            )
+                        }
                     }
+
+                    urlResult?.getOrThrow()?.let { url ->
+                        val resolved = ResolvedStream(
+                            videoId = videoId,
+                            url = url.toUri(),
+                            resolvedAtMs = System.currentTimeMillis()
+                        )
+
+                        streamRingBuffer.append(resolved)
+
+                        AppLog.d(
+                            "Player",
+                            "Resolved $videoId via ${resolved.url.host} " +
+                                "(expire=${resolved.url.getQueryParameter("expire") ?: "unknown"})"
+                        )
+
+                        dataSpec.withUri(resolved.url)
+                            .subrange(dataSpec.uriPositionOffset, chunkLength)
+                    } ?: throw PlaybackException(
+                        null,
+                        urlResult?.exceptionOrNull(),
+                        PlaybackException.ERROR_CODE_REMOTE_ERROR
+                    )
                 }
             }
         }
@@ -1185,5 +1254,9 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
         private const val SleepTimerNotificationId = 1002
         private const val SleepTimerNotificationChannelId = "sleep_timer_channel_id"
+
+        private const val MaxStreamUrlRetries = 3
+        private const val StreamUrlMaxAgeMs = 30 * 60 * 1000L
+        private val StreamRetryHttpStatus = setOf(403, 404, 410)
     }
 }
