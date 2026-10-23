@@ -34,6 +34,7 @@ import it.vfsfitvnm.vimusic.query
 import it.vfsfitvnm.vimusic.service.PlayerMediaBrowserService
 import it.vfsfitvnm.vimusic.ui.components.themed.Header
 import it.vfsfitvnm.vimusic.ui.styling.LocalAppearance
+import it.vfsfitvnm.vimusic.utils.checkForUpdatesKey
 import it.vfsfitvnm.vimusic.utils.isAtLeastAndroid12
 import it.vfsfitvnm.vimusic.utils.isAtLeastAndroid6
 import it.vfsfitvnm.vimusic.utils.isIgnoringBatteryOptimizations
@@ -82,6 +83,8 @@ fun OtherSettings() {
         }
 
     var pauseSearchHistory by rememberPreference(pauseSearchHistoryKey, false)
+
+    var checkForUpdates by rememberPreference(checkForUpdatesKey, true)
 
     val queriesCount by remember {
         Database.queriesCount().distinctUntilChanged()
@@ -177,6 +180,17 @@ fun OtherSettings() {
             text = "When turning off battery optimizations is not enough",
             isChecked = isInvincibilityEnabled,
             onCheckedChange = { isInvincibilityEnabled = it }
+        )
+
+        SettingsGroupSpacer()
+
+        SettingsEntryGroupText(title = "UPDATES")
+
+        SwitchSettingEntry(
+            title = "Check for updates",
+            text = "Look for new releases on GitHub when the app starts",
+            isChecked = checkForUpdates,
+            onCheckedChange = { checkForUpdates = it }
         )
     }
 }

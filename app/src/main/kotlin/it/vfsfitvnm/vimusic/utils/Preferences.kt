@@ -38,6 +38,7 @@ const val homeScreenTabIndexKey = "homeScreenTabIndex"
 const val searchResultScreenTabIndexKey = "searchResultScreenTabIndex"
 const val artistScreenTabIndexKey = "artistScreenTabIndex"
 const val pauseSearchHistoryKey = "pauseSearchHistory"
+const val checkForUpdatesKey = "checkForUpdates"
 
 inline fun <reified T : Enum<T>> SharedPreferences.getEnum(
     key: String,

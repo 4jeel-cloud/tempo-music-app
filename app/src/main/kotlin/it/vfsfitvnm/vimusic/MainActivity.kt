@@ -34,6 +34,7 @@ import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -70,6 +71,7 @@ import it.vfsfitvnm.vimusic.enums.ThumbnailRoundness
 import it.vfsfitvnm.vimusic.service.PlayerService
 import it.vfsfitvnm.vimusic.ui.components.BottomSheetMenu
 import it.vfsfitvnm.vimusic.ui.components.LocalMenuState
+import it.vfsfitvnm.vimusic.ui.components.UpdateDialog
 import it.vfsfitvnm.vimusic.ui.components.rememberBottomSheetState
 import it.vfsfitvnm.vimusic.ui.screens.albumRoute
 import it.vfsfitvnm.vimusic.ui.screens.artistRoute
@@ -84,6 +86,7 @@ import it.vfsfitvnm.vimusic.ui.styling.dynamicColorPaletteOf
 import it.vfsfitvnm.vimusic.ui.styling.typographyOf
 import it.vfsfitvnm.vimusic.utils.applyFontPaddingKey
 import it.vfsfitvnm.vimusic.utils.asMediaItem
+import it.vfsfitvnm.vimusic.utils.checkForUpdatesKey
 import it.vfsfitvnm.vimusic.utils.colorPaletteModeKey
 import it.vfsfitvnm.vimusic.utils.colorPaletteNameKey
 import it.vfsfitvnm.vimusic.utils.forcePlay
@@ -93,6 +96,8 @@ import it.vfsfitvnm.vimusic.utils.isAtLeastAndroid6
 import it.vfsfitvnm.vimusic.utils.isAtLeastAndroid8
 import it.vfsfitvnm.vimusic.utils.preferences
 import it.vfsfitvnm.vimusic.utils.thumbnailRoundnessKey
+import it.vfsfitvnm.vimusic.utils.UpdateInfo
+import it.vfsfitvnm.vimusic.utils.Updater
 import it.vfsfitvnm.vimusic.utils.useSystemFontKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -137,6 +142,18 @@ class MainActivity : ComponentActivity(), PersistMapOwner {
         setContent {
             val coroutineScope = rememberCoroutineScope()
             val isSystemInDarkTheme = isSystemInDarkTheme()
+
+            var availableUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
+            var hasCheckedForUpdates by rememberSaveable { mutableStateOf(false) }
+
+            LaunchedEffect(Unit) {
+                if (!hasCheckedForUpdates) {
+                    hasCheckedForUpdates = true
+                    if (preferences.getBoolean(checkForUpdatesKey, true)) {
+                        availableUpdate = Updater.checkForUpdates()
+                    }
+                }
+            }
 
             var appearance by rememberSaveable(
                 isSystemInDarkTheme,
@@ -365,6 +382,13 @@ class MainActivity : ComponentActivity(), PersistMapOwner {
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                     )
+
+                    availableUpdate?.let { info ->
+                        UpdateDialog(
+                            info = info,
+                            onDismiss = { availableUpdate = null }
+                        )
+                    }
                 }
 
                 DisposableEffect(binder?.player) {
