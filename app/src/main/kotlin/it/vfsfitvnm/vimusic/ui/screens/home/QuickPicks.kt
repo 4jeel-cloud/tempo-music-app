@@ -27,6 +27,8 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,7 +39,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.scale
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
 import it.vfsfitvnm.compose.persist.persist
 import it.vfsfitvnm.innertube.Innertube
 import it.vfsfitvnm.innertube.models.NavigationEndpoint
@@ -71,6 +82,7 @@ import it.vfsfitvnm.vimusic.utils.asMediaItem
 import it.vfsfitvnm.vimusic.utils.center
 import it.vfsfitvnm.vimusic.utils.forcePlay
 import it.vfsfitvnm.vimusic.utils.isLandscape
+import it.vfsfitvnm.vimusic.utils.medium
 import it.vfsfitvnm.vimusic.utils.secondary
 import it.vfsfitvnm.vimusic.utils.semiBold
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -152,9 +164,12 @@ fun QuickPicks(
                 )
         ) {
             Header(
-                title = "Quick picks",
                 modifier = Modifier
-                    .padding(endPaddingValues)
+                    .padding(endPaddingValues),
+                titleContent = {
+                    QuickPicksTitle(onClick = onSearchClick)
+                },
+                actionsContent = {}
             )
 
             relatedPageResult?.getOrNull()?.let { related ->
@@ -375,6 +390,37 @@ fun QuickPicks(
             scrollState = scrollState,
             iconId = R.drawable.search,
             onClick = onSearchClick
+        )
+    }
+}
+
+@Composable
+private fun QuickPicksTitle(onClick: () -> Unit) {
+    val (colorPalette, typography) = LocalAppearance.current
+    val style = typography.xxl.medium
+    val fontSize = style.fontSize
+
+    Row(
+        modifier = Modifier.clickable(
+            onClickLabel = "Search",
+            onClick = onClick
+        ),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Image(
+            painter = painterResource(R.drawable.magnifying_glass_solid),
+            contentDescription = null,
+            colorFilter = ColorFilter.tint(colorPalette.text),
+            modifier = Modifier
+                .size((fontSize.value * 0.88f).dp)
+                .offset(x = (fontSize.value * (-0.02f)).dp, y = (fontSize.value * 0.01f).dp)
+        )
+        BasicText(
+            text = "uick picks",
+            style = style,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.offset(x = (fontSize.value * (-0.08f)).dp)
         )
     }
 }
