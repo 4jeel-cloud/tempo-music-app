@@ -16,7 +16,6 @@ dependencies {
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.client.encoding)
-    implementation(libs.ktor.client.serialization)
     implementation(libs.ktor.serialization.json)
 
     implementation(libs.kotlin.coroutines)

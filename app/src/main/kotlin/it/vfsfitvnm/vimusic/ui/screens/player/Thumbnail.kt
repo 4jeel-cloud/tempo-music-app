@@ -2,6 +2,7 @@ package it.vfsfitvnm.vimusic.ui.screens.player
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -44,6 +45,7 @@ import it.vfsfitvnm.vimusic.ui.styling.LocalAppearance
 import it.vfsfitvnm.vimusic.ui.styling.px
 import it.vfsfitvnm.vimusic.utils.currentWindow
 import it.vfsfitvnm.vimusic.utils.DisposableListener
+import it.vfsfitvnm.vimusic.utils.mediaItems
 import it.vfsfitvnm.vimusic.utils.rememberPreference
 import it.vfsfitvnm.vimusic.utils.swipeToChangeSongKey
 import it.vfsfitvnm.vimusic.utils.thumbnail
@@ -51,7 +53,8 @@ import java.net.UnknownHostException
 import java.nio.channels.UnresolvedAddressException
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -106,41 +109,13 @@ fun Thumbnail(
 
     val window = nullableWindow ?: return
 
-    val timeline = remember(timelineRevision, window.mediaItem.mediaId) {
+    val timeline = remember(timelineRevision) {
         player.currentTimeline
     }
-    val currentIndex = player.currentMediaItemIndex
-    val shuffleModeEnabled = player.shuffleModeEnabled
-    val previousIndex = if (!timeline.isEmpty) {
-        timeline.getPreviousWindowIndex(
-            currentIndex,
-            Player.REPEAT_MODE_OFF,
-            shuffleModeEnabled
-        )
-    } else {
-        C.INDEX_UNSET
+    val mediaItems = remember(timelineRevision) {
+        timeline.mediaItems
     }
-    val nextIndex = if (!timeline.isEmpty) {
-        timeline.getNextWindowIndex(
-            currentIndex,
-            Player.REPEAT_MODE_OFF,
-            shuffleModeEnabled
-        )
-    } else {
-        C.INDEX_UNSET
-    }
-    val previousMediaItem = if (previousIndex != C.INDEX_UNSET) {
-        runCatching { player.getMediaItemAt(previousIndex) }.getOrNull()
-    } else {
-        null
-    }
-    val nextMediaItem = if (nextIndex != C.INDEX_UNSET) {
-        runCatching { player.getMediaItemAt(nextIndex) }.getOrNull()
-    } else {
-        null
-    }
-    val mediaItems = listOfNotNull(previousMediaItem, window.mediaItem, nextMediaItem)
-    val currentMediaIndex = mediaItems.indexOf(window.mediaItem)
+    val currentMediaIndex = player.currentMediaItemIndex
     val latestMediaItems = rememberUpdatedState(mediaItems)
     val latestCurrentMediaIndex = rememberUpdatedState(currentMediaIndex)
 
@@ -161,23 +136,39 @@ fun Thumbnail(
 
     LaunchedEffect(
         window.mediaItem.mediaId,
-        mediaItems.map(MediaItem::mediaId),
         currentMediaIndex,
-        swipeEnabled
+        swipeEnabled,
+        timelineRevision
     ) {
-        if (!swipeEnabled) {
+        if (!swipeEnabled || currentMediaIndex !in mediaItems.indices) {
             return@LaunchedEffect
         }
 
-        val index = currentMediaIndex
-        if (index in mediaItems.indices && !thumbnailGridState.isScrollInProgress) {
-            thumbnailGridState.scrollToItem(index)
+        if (thumbnailGridState.isScrollInProgress) {
+            snapshotFlow { thumbnailGridState.isScrollInProgress }
+                .first { !it }
+        }
+
+        if (thumbnailGridState.firstVisibleItemIndex != currentMediaIndex ||
+            thumbnailGridState.firstVisibleItemScrollOffset != 0
+        ) {
+            thumbnailGridState.scrollToItem(currentMediaIndex)
         }
     }
 
     LaunchedEffect(swipeEnabled) {
         if (!swipeEnabled) {
             return@LaunchedEffect
+        }
+
+        var userScrollInProgress = false
+
+        launch {
+            thumbnailGridState.interactionSource.interactions.collect { interaction ->
+                if (interaction is DragInteraction.Start) {
+                    userScrollInProgress = true
+                }
+            }
         }
 
         snapshotFlow {
@@ -188,27 +179,30 @@ fun Thumbnail(
             )
         }
             .distinctUntilChanged()
-            .drop(1)
             .collect { (isScrolling, firstVisibleItemIndex, scrollOffset) ->
-                if (isScrolling || scrollOffset != 0) {
+                if (isScrolling || !userScrollInProgress) {
                     return@collect
                 }
 
-                val index = latestCurrentMediaIndex.value
-                if (index < 0) {
+                if (scrollOffset != 0) {
                     return@collect
                 }
 
-                val settledItem = latestMediaItems.value.getOrNull(firstVisibleItemIndex)
-                    ?: return@collect
-                if (settledItem.mediaId == player.currentMediaItem?.mediaId) {
+                userScrollInProgress = false
+
+                val items = latestMediaItems.value
+                if (firstVisibleItemIndex !in items.indices) {
                     return@collect
                 }
 
-                if (firstVisibleItemIndex > index && player.hasNextMediaItem()) {
-                    player.seekToNext()
-                } else if (firstVisibleItemIndex < index && player.hasPreviousMediaItem()) {
-                    player.seekToPreviousMediaItem()
+                val currentIndex = latestCurrentMediaIndex.value
+                if (firstVisibleItemIndex == currentIndex) {
+                    return@collect
+                }
+
+                val settledItem = items[firstVisibleItemIndex]
+                if (settledItem.mediaId != player.currentMediaItem?.mediaId) {
+                    player.seekTo(firstVisibleItemIndex, C.TIME_UNSET)
                 }
             }
     }
@@ -227,10 +221,7 @@ fun Thumbnail(
             userScrollEnabled = swipeEnabled,
             modifier = Modifier.fillMaxSize()
         ) {
-            items(
-                items = mediaItems,
-                key = { it.mediaId }
-            ) { item ->
+            items(items = mediaItems) { item ->
                 Box(
                     modifier = Modifier
                         .width(itemWidth)
