@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import coil.compose.AsyncImage
 import it.vfsfitvnm.innertube.models.NavigationEndpoint
 import it.vfsfitvnm.compose.routing.OnGlobalRoute
@@ -54,6 +55,7 @@ import it.vfsfitvnm.vimusic.service.PlayerService
 import it.vfsfitvnm.vimusic.ui.components.BottomSheet
 import it.vfsfitvnm.vimusic.ui.components.BottomSheetState
 import it.vfsfitvnm.vimusic.ui.components.LocalMenuState
+import it.vfsfitvnm.vimusic.ui.components.SwipeToChangeSong
 import it.vfsfitvnm.vimusic.ui.components.rememberBottomSheetState
 import it.vfsfitvnm.vimusic.ui.components.themed.BaseMediaItemMenu
 import it.vfsfitvnm.vimusic.ui.components.themed.IconButton
@@ -65,10 +67,13 @@ import it.vfsfitvnm.vimusic.utils.DisposableListener
 import it.vfsfitvnm.vimusic.utils.forceSeekToNext
 import it.vfsfitvnm.vimusic.utils.isLandscape
 import it.vfsfitvnm.vimusic.utils.positionAndDurationState
+import it.vfsfitvnm.vimusic.utils.rememberPreference
 import it.vfsfitvnm.vimusic.utils.seamlessPlay
 import it.vfsfitvnm.vimusic.utils.secondary
 import it.vfsfitvnm.vimusic.utils.semiBold
 import it.vfsfitvnm.vimusic.utils.shouldBePlaying
+import it.vfsfitvnm.vimusic.utils.swipeSensitivityKey
+import it.vfsfitvnm.vimusic.utils.swipeToChangeSongKey
 import it.vfsfitvnm.vimusic.utils.thumbnail
 import it.vfsfitvnm.vimusic.utils.toast
 import kotlin.math.absoluteValue
@@ -87,6 +92,9 @@ fun Player(
 
     binder?.player ?: return
 
+    val swipeToChangeSong by rememberPreference(swipeToChangeSongKey, true)
+    val swipeSensitivity by rememberPreference(swipeSensitivityKey, 73)
+
     var nullableMediaItem by remember {
         mutableStateOf(binder.player.currentMediaItem, neverEqualPolicy())
     }
@@ -95,10 +103,36 @@ fun Player(
         mutableStateOf(binder.player.shouldBePlaying)
     }
 
+    var canGoPrevious by remember {
+        mutableStateOf(binder.player.hasPreviousMediaItem())
+    }
+
+    var canGoNext by remember {
+        mutableStateOf(binder.player.hasNextMediaItem())
+    }
+
     binder.player.DisposableListener {
         object : Player.Listener {
+            private fun refreshNavigationState() {
+                canGoPrevious = binder.player.hasPreviousMediaItem()
+                canGoNext = binder.player.hasNextMediaItem()
+            }
+
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 nullableMediaItem = mediaItem
+                refreshNavigationState()
+            }
+
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                refreshNavigationState()
+            }
+
+            override fun onRepeatModeChanged(repeatMode: Int) {
+                refreshNavigationState()
+            }
+
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                refreshNavigationState()
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -132,9 +166,7 @@ fun Player(
             binder.player.clearMediaItems()
         },
         collapsedContent = {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.Top,
+            Box(
                 modifier = Modifier
                     .background(colorPalette.background1)
                     .fillMaxSize()
@@ -151,6 +183,20 @@ fun Player(
                         )
                     }
             ) {
+                SwipeToChangeSong(
+                    enabled = swipeToChangeSong,
+                    sensitivity = swipeSensitivity / 100f,
+                    canGoPrevious = canGoPrevious,
+                    canGoNext = canGoNext,
+                    onGoPrevious = binder.player::seekToPreviousMediaItem,
+                    onGoNext = binder.player::seekToNext,
+                    modifier = Modifier.fillMaxSize()
+                ) { swipeModifier ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.Top,
+                        modifier = swipeModifier.fillMaxSize()
+                    ) {
                 Spacer(
                     modifier = Modifier
                         .width(2.dp)
@@ -234,6 +280,8 @@ fun Player(
                     modifier = Modifier
                         .width(2.dp)
                 )
+                    }
+                }
             }
         }
     ) {

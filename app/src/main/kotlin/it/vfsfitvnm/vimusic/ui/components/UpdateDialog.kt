@@ -117,6 +117,19 @@ fun UpdateDialog(
                 )
             }
 
+            if (!downloading && state !is UpdateState.Installing) {
+                DialogTextButton(
+                    text = "Browser",
+                    onClick = {
+                        if (Updater.openDownloadInBrowser(context, info)) {
+                            onDismiss()
+                        } else {
+                            state = UpdateState.Failed("Couldn't open a browser. Visit ${info.pageUrl} manually.")
+                        }
+                    }
+                )
+            }
+
             DialogTextButton(
                 primary = true,
                 enabled = !downloading && state !is UpdateState.Installing,
@@ -142,7 +155,7 @@ fun UpdateDialog(
                         if (!launched) {
                             // The install permission page was opened; keep the APK for when
                             // the user returns. Re-tapping Update will retry the installer.
-                            state = UpdateState.Failed("Allow \"Install unknown apps\" for Tempo, then tap Retry.")
+                            state = UpdateState.Failed("Allow \"Install unknown apps\" for Tempo, then tap Retry. If the installer is still blocked, use Browser.")
                             return@launch
                         }
                         onDismiss()
@@ -152,7 +165,7 @@ fun UpdateDialog(
         }
 
         BasicText(
-            text = "Tempo installs updates it downloads from its GitHub releases.",
+            text = "Tempo installs updates from its GitHub releases. If installation is blocked, use Browser.",
             style = typography.xxs.secondary.copy(textAlign = TextAlign.Center),
             modifier = Modifier
                 .padding(top = 8.dp)

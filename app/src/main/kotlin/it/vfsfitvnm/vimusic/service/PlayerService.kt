@@ -49,8 +49,11 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.Cache
+import androidx.media3.datasource.cache.CacheDataSink
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheWriter
+import androidx.media3.datasource.cache.ContentMetadata
+import androidx.media3.datasource.cache.ContentMetadataMutations
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
@@ -118,6 +121,8 @@ import it.vfsfitvnm.vimusic.widget.PlaylistWidgetManager
 import it.vfsfitvnm.vimusic.widget.WidgetRefresh
 import it.vfsfitvnm.vimusic.widget.WidgetState
 import it.vfsfitvnm.vimusic.widget.WidgetUtils
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 import kotlin.system.exitProcess
 import kotlinx.coroutines.CoroutineScope
@@ -138,7 +143,11 @@ import kotlinx.coroutines.withContext
 class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListener.Callback,
     SharedPreferences.OnSharedPreferenceChangeListener {
     private lateinit var mediaSession: MediaSession
-    private lateinit var cache: SimpleCache
+    private lateinit var downloadCache: SimpleCache
+    private lateinit var playerCache: SimpleCache
+    private val knownContentLengths = ConcurrentHashMap<String, Long>()
+    private val sanitizedPlayerCacheKeys = ConcurrentHashMap.newKeySet<String>()
+    private val sanitizedDownloadCacheKeys = ConcurrentHashMap.newKeySet<String>()
     private lateinit var player: ExoPlayer
 
     private val stateBuilder = PlaybackState.Builder()
@@ -239,10 +248,10 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         }
 
         // TODO: Remove in a future release
-        val directory = cacheDir.resolve("exoplayer").also { directory ->
+        val playerCacheDirectory = cacheDir.resolve("exoplayer").also { directory ->
             if (directory.exists()) return@also
 
-            directory.mkdir()
+            directory.mkdirs()
 
             cacheDir.listFiles()?.forEach { file ->
                 if (file.isDirectory && file.name.length == 1 && file.name.isDigitsOnly() || file.extension == "uid") {
@@ -254,7 +263,22 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
             filesDir.resolve("coil").deleteRecursively()
         }
-        cache = SimpleCache(directory, cacheEvictor, StandaloneDatabaseProvider(this))
+
+        val downloadCacheDirectory = filesDir.resolve("download")
+        migrateLegacyCache(playerCacheDirectory, downloadCacheDirectory)
+        downloadCacheDirectory.mkdirs()
+
+        downloadCache = SimpleCache(
+            downloadCacheDirectory,
+            NoOpCacheEvictor(),
+            StandaloneDatabaseProvider(this)
+        )
+        playerCache = SimpleCache(
+            playerCacheDirectory,
+            cacheEvictor,
+            StandaloneDatabaseProvider(this)
+        )
+        repairDownloadCache()
 
         player = ExoPlayer.Builder(this, createRendersFactory(), createMediaSourceFactory())
             .setHandleAudioBecomingNoisy(true)
@@ -342,7 +366,8 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
         mediaSession.isActive = false
         mediaSession.release()
-        cache.release()
+        downloadCache.release()
+        playerCache.release()
 
         loudnessEnhancer?.release()
 
@@ -886,117 +911,280 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         return nowMs - resolvedAtMs < StreamUrlMaxAgeMs
     }
 
-    private fun createCacheDataSource(): DataSource.Factory {
-        return CacheDataSource.Factory().setCache(cache).apply {
-            setUpstreamDataSourceFactory(
-                DefaultHttpDataSource.Factory()
-                    .setConnectTimeoutMs(16000)
-                    .setReadTimeoutMs(8000)
-                    .setUserAgent("Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0")
+    private fun migrateLegacyCache(legacyDirectory: File, downloadDirectory: File) {
+        if (downloadDirectory.exists()) return
+
+        if (!legacyDirectory.exists() || legacyDirectory.listFiles().isNullOrEmpty()) {
+            downloadDirectory.mkdirs()
+            return
+        }
+
+        AppLog.i("Cache", "Migrating legacy cache to ${downloadDirectory.absolutePath}")
+
+        if (legacyDirectory.renameTo(downloadDirectory)) {
+            AppLog.i("Cache", "Legacy cache moved to ${downloadDirectory.absolutePath}")
+            return
+        }
+
+        val copied = runCatching {
+            legacyDirectory.copyRecursively(downloadDirectory, overwrite = true)
+        }.onFailure {
+            AppLog.e("Cache", "Failed to copy legacy cache", it)
+        }.getOrDefault(false)
+
+        if (copied) {
+            legacyDirectory.deleteRecursively()
+            AppLog.i("Cache", "Legacy cache copied to ${downloadDirectory.absolutePath}")
+        } else {
+            downloadDirectory.deleteRecursively()
+            downloadDirectory.mkdirs()
+            AppLog.e(
+                "Cache",
+                "Could not migrate the legacy cache; it will remain the playback cache"
             )
         }
     }
 
-    private fun createDataSourceFactory(): DataSource.Factory {
-        val chunkLength = 512 * 1024L
+    private fun repairDownloadCache() {
+        coroutineScope.launch(Dispatchers.IO) {
+            runCatching {
+                downloadCache.getKeys().forEach { key ->
+                    val cachedLength = downloadCache.getCachedBytes(key, 0, Long.MAX_VALUE)
 
-        return ResolvingDataSource.Factory(createCacheDataSource()) { dataSpec ->
-            val videoId = dataSpec.key ?: error("A key must be set")
-
-            if (cache.isCached(videoId, dataSpec.position, chunkLength)) {
-                dataSpec
-            } else {
-                val reusable = streamRingBuffer.firstOrNull {
-                    it != null && it.videoId == videoId && it.isFresh()
-                }
-
-                if (reusable != null) {
-                    dataSpec.withUri(reusable.url)
-                } else {
-                    AppLog.d("Player", "Resolving stream for $videoId")
-                    val urlResult = runBlocking(Dispatchers.IO) {
-                        Innertube.player(PlayerBody(videoId = videoId))
-                    }?.mapCatching { body ->
-                        if (body.videoDetails?.videoId != videoId) {
-                            throw VideoIdMismatchException()
-                        }
-
-                        when (val status = body.playabilityStatus?.status) {
-                            "OK" -> body.streamingData?.highestQualityFormat?.let { format ->
-                                val mediaItem = runBlocking(Dispatchers.Main) {
-                                    player.findNextMediaItemById(videoId)
-                                }
-
-                                if (mediaItem?.mediaMetadata?.extras?.getString("durationText") == null) {
-                                    format.approxDurationMs?.div(1000)
-                                        ?.let(DateUtils::formatElapsedTime)?.removePrefix("0")
-                                        ?.let { durationText ->
-                                            mediaItem?.mediaMetadata?.extras?.putString(
-                                                "durationText",
-                                                durationText
-                                            )
-                                            Database.updateDurationText(videoId, durationText)
-                                        }
-                                }
-
-                                query {
-                                    mediaItem?.let(Database::insert)
-
-                                    Database.insert(
-                                        it.vfsfitvnm.vimusic.models.Format(
-                                            songId = videoId,
-                                            itag = format.itag,
-                                            mimeType = format.mimeType,
-                                            bitrate = format.bitrate,
-                                            loudnessDb = body.playerConfig?.audioConfig?.normalizedLoudnessDb,
-                                            contentLength = format.contentLength,
-                                            lastModified = format.lastModified
-                                        )
-                                    )
-                                }
-
-                                format.url
-                            } ?: throw PlayableFormatNotFoundException()
-
-                            "UNPLAYABLE" -> throw UnplayableException()
-                            "LOGIN_REQUIRED" -> throw LoginRequiredException()
-                            else -> throw PlaybackException(
-                                status,
-                                null,
-                                PlaybackException.ERROR_CODE_REMOTE_ERROR
-                            )
-                        }
+                    if (cachedLength <= 0) {
+                        downloadCache.removeResource(key)
+                        return@forEach
                     }
 
-                    urlResult?.getOrThrow()?.let { url ->
-                        val resolved = ResolvedStream(
-                            videoId = videoId,
-                            url = url.toUri(),
-                            resolvedAtMs = System.currentTimeMillis()
-                        )
+                    val databaseLength = Database.formatOnce(key)?.contentLength
 
-                        streamRingBuffer.append(resolved)
+                    when {
+                        databaseLength == null -> {
+                            knownContentLengths.remove(key)
+                            clearCacheContentLength(downloadCache, key)
+                        }
 
-                        AppLog.d(
-                            "Player",
-                            "Resolved $videoId via ${resolved.url.host} " +
-                                "(expire=${resolved.url.getQueryParameter("expire") ?: "unknown"})"
-                        )
+                        cachedLength < databaseLength -> {
+                            AppLog.w(
+                                "Cache",
+                                "Removing incomplete download $key ($cachedLength < $databaseLength)"
+                            )
+                            downloadCache.removeResource(key)
+                            knownContentLengths.remove(key)
+                        }
 
-                        dataSpec.withUri(resolved.url)
-                            .subrange(dataSpec.uriPositionOffset, chunkLength)
-                    } ?: throw PlaybackException(
-                        null,
-                        urlResult?.exceptionOrNull(),
-                        PlaybackException.ERROR_CODE_REMOTE_ERROR
-                    )
+                        else -> {
+                            knownContentLengths[key] = cachedLength
+                            applyCacheContentLength(downloadCache, key, cachedLength)
+                        }
+                    }
                 }
+            }.onFailure {
+                AppLog.e("Cache", "Failed to repair download cache", it)
             }
         }
     }
 
+    private fun cacheContentLength(cache: Cache, key: String): Long? =
+        ContentMetadata.getContentLength(cache.getContentMetadata(key))
+            .takeIf { it != C.LENGTH_UNSET.toLong() && it > 0 }
+
+    private fun applyCacheContentLength(cache: Cache, key: String, length: Long) {
+        if (length <= 0 || cacheContentLength(cache, key) == length) return
+
+        runCatching {
+            cache.applyContentMetadataMutations(
+                key,
+                ContentMetadataMutations.setContentLength(ContentMetadataMutations(), length)
+            )
+        }.onFailure {
+            AppLog.e("Cache", "Failed to store content length for $key", it)
+        }
+    }
+
+    private fun clearCacheContentLength(cache: Cache, key: String) {
+        if (ContentMetadata.getContentLength(cache.getContentMetadata(key)) == C.LENGTH_UNSET.toLong()) {
+            return
+        }
+
+        runCatching {
+            cache.applyContentMetadataMutations(
+                key,
+                ContentMetadataMutations().remove(ContentMetadata.KEY_CONTENT_LENGTH)
+            )
+        }.onFailure {
+            AppLog.e("Cache", "Failed to clear content length for $key", it)
+        }
+    }
+
+    private fun sanitizePlaybackCaches(key: String) {
+        if (sanitizedPlayerCacheKeys.add(key)) {
+            clearCacheContentLength(playerCache, key)
+        }
+
+        if (!sanitizedDownloadCacheKeys.add(key)) return
+
+        val cachedLength = runCatching {
+            downloadCache.getCachedBytes(key, 0, Long.MAX_VALUE)
+        }.getOrDefault(0L)
+
+        val expectedLength = knownContentLengths[key] ?: runCatching {
+            runBlocking(Dispatchers.IO) { Database.formatOnce(key)?.contentLength }
+        }.getOrNull()
+
+        if (cachedLength > 0 && expectedLength != null && cachedLength >= expectedLength) {
+            knownContentLengths[key] = cachedLength
+            applyCacheContentLength(downloadCache, key, cachedLength)
+        } else {
+            clearCacheContentLength(downloadCache, key)
+        }
+    }
+
+    private fun knownContentLength(key: String): Long? {
+        knownContentLengths[key]?.let { return it }
+
+        cacheContentLength(downloadCache, key)?.let {
+            knownContentLengths[key] = it
+            return it
+        }
+
+        return runCatching {
+            runBlocking(Dispatchers.IO) { Database.formatOnce(key)?.contentLength }
+        }.getOrNull()
+            ?.takeIf { it > 0 }
+            ?.also { knownContentLengths[key] = it }
+    }
+
+    private fun createHttpDataSourceFactory(): DataSource.Factory =
+        DefaultHttpDataSource.Factory()
+            .setConnectTimeoutMs(16000)
+            .setReadTimeoutMs(8000)
+            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0")
+
+    private fun createPlayerCacheDataSourceFactory(): DataSource.Factory =
+        CacheDataSource.Factory()
+            .setCache(playerCache)
+            .setUpstreamDataSourceFactory(createHttpDataSourceFactory())
+            .setCacheWriteDataSinkFactory(CacheDataSink.Factory().setCache(playerCache))
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
+    private fun createPlaybackDataSourceFactory(): DataSource.Factory =
+        ResolvingDataSource.Factory(
+            CacheDataSource.Factory()
+                .setCache(downloadCache)
+                .setUpstreamDataSourceFactory(createPlayerCacheDataSourceFactory())
+                .setCacheWriteDataSinkFactory(null)
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        ) { dataSpec ->
+            val videoId = dataSpec.key ?: error("A key must be set")
+            sanitizePlaybackCaches(videoId)
+
+            if (dataSpec.length == 0L) {
+                return@Factory dataSpec.subrange(0, 0)
+            }
+
+            val requestedLength =
+                dataSpec.length.takeIf { it != C.LENGTH_UNSET.toLong() } ?: Long.MAX_VALUE
+            val probeLength = minOf(ChunkLength, requestedLength)
+
+            if (probeLength <= 0) {
+                return@Factory dataSpec.subrange(0, 0)
+            }
+
+            if (downloadCache.isCached(videoId, dataSpec.position, probeLength) ||
+                playerCache.isCached(videoId, dataSpec.position, probeLength)
+            ) {
+                return@Factory dataSpec
+            }
+
+            val reusable = streamRingBuffer.firstOrNull {
+                it != null && it.videoId == videoId && it.isFresh()
+            }
+
+            if (reusable != null) {
+                dataSpec.withUri(reusable.url).subrange(0, probeLength)
+            } else {
+                AppLog.d("Player", "Resolving stream for $videoId")
+                val urlResult = runBlocking(Dispatchers.IO) {
+                    Innertube.player(PlayerBody(videoId = videoId))
+                }?.mapCatching { body ->
+                    if (body.videoDetails?.videoId != videoId) {
+                        throw VideoIdMismatchException()
+                    }
+
+                    when (val status = body.playabilityStatus?.status) {
+                        "OK" -> body.streamingData?.highestQualityFormat?.let { format ->
+                            val mediaItem = runBlocking(Dispatchers.Main) {
+                                player.findNextMediaItemById(videoId)
+                            }
+
+                            if (mediaItem?.mediaMetadata?.extras?.getString("durationText") == null) {
+                                format.approxDurationMs?.div(1000)
+                                    ?.let(DateUtils::formatElapsedTime)?.removePrefix("0")
+                                    ?.let { durationText ->
+                                        mediaItem?.mediaMetadata?.extras?.putString(
+                                            "durationText",
+                                            durationText
+                                        )
+                                        Database.updateDurationText(videoId, durationText)
+                                    }
+                            }
+
+                            query {
+                                mediaItem?.let(Database::insert)
+
+                                Database.insertResolvedFormat(
+                                    it.vfsfitvnm.vimusic.models.Format(
+                                        songId = videoId,
+                                        itag = format.itag,
+                                        mimeType = format.mimeType,
+                                        bitrate = format.bitrate,
+                                        loudnessDb = body.playerConfig?.audioConfig?.normalizedLoudnessDb,
+                                        contentLength = format.contentLength,
+                                        lastModified = format.lastModified
+                                    )
+                                )
+                            }
+
+                            format.url
+                        } ?: throw PlayableFormatNotFoundException()
+
+                        "UNPLAYABLE" -> throw UnplayableException()
+                        "LOGIN_REQUIRED" -> throw LoginRequiredException()
+                        else -> throw PlaybackException(
+                            status,
+                            null,
+                            PlaybackException.ERROR_CODE_REMOTE_ERROR
+                        )
+                    }
+                }
+
+                urlResult?.getOrThrow()?.let { url ->
+                    val resolved = ResolvedStream(
+                        videoId = videoId,
+                        url = url.toUri(),
+                        resolvedAtMs = System.currentTimeMillis()
+                    )
+
+                    streamRingBuffer.append(resolved)
+
+                    AppLog.d(
+                        "Player",
+                        "Resolved $videoId via ${resolved.url.host} " +
+                            "(expire=${resolved.url.getQueryParameter("expire") ?: "unknown"})"
+                    )
+
+                    dataSpec.withUri(resolved.url).subrange(0, probeLength)
+                } ?: throw PlaybackException(
+                    null,
+                    urlResult?.exceptionOrNull(),
+                    PlaybackException.ERROR_CODE_REMOTE_ERROR
+                )
+            }
+        }
+
     private fun createMediaSourceFactory(): MediaSource.Factory {
-        return DefaultMediaSourceFactory(createDataSourceFactory(), createExtractorsFactory())
+        return DefaultMediaSourceFactory(createPlaybackDataSourceFactory(), createExtractorsFactory())
     }
 
     private fun createExtractorsFactory(): ExtractorsFactory {
@@ -1036,8 +1224,11 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         val player: ExoPlayer
             get() = this@PlayerService.player
 
-        val cache: Cache
-            get() = this@PlayerService.cache
+        val downloadCache: Cache
+            get() = this@PlayerService.downloadCache
+
+        val playerCache: Cache
+            get() = this@PlayerService.playerCache
 
         val mediaSession
             get() = this@PlayerService.mediaSession
@@ -1052,8 +1243,10 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
         val downloadingIds = mutableStateListOf<String>()
 
-        fun isDownloaded(songId: String, contentLength: Long?): Boolean =
-            contentLength != null && cache.isCached(songId, 0, contentLength)
+        fun isDownloaded(songId: String, contentLength: Long?): Boolean {
+            val length = contentLength ?: knownContentLength(songId) ?: return false
+            return downloadCache.isCached(songId, 0, length)
+        }
 
         fun download(mediaItem: MediaItem, contentLength: Long?) {
             val songId = mediaItem.mediaId
@@ -1076,13 +1269,8 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                         ?: throw IllegalStateException("No stream url for $songId")
 
                     val dataSource = CacheDataSource.Factory()
-                        .setCache(cache)
-                        .setUpstreamDataSourceFactory(
-                            DefaultHttpDataSource.Factory()
-                                .setConnectTimeoutMs(16000)
-                                .setReadTimeoutMs(8000)
-                                .setUserAgent("Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0")
-                        )
+                        .setCache(downloadCache)
+                        .setUpstreamDataSourceFactory(createHttpDataSourceFactory())
                         .createDataSource()
 
                     CacheWriter(
@@ -1097,11 +1285,16 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
                         null
                     ).cache()
 
-                    // NewPipe does not expose a content length, so record the size we actually
-                    // cached; the Offline list compares it against cache.isCached().
                     val cachedLength = runCatching {
-                        cache.getCachedBytes(songId, 0, Long.MAX_VALUE).takeIf { it > 0 }
-                    }.getOrNull() ?: format.contentLength
+                        downloadCache.getCachedBytes(songId, 0, Long.MAX_VALUE).takeIf { it > 0 }
+                    }.getOrNull() ?: throw IllegalStateException("Nothing was cached for $songId")
+
+                    knownContentLengths[songId] = cachedLength
+                    applyCacheContentLength(downloadCache, songId, cachedLength)
+
+                    if (!downloadCache.isCached(songId, 0, cachedLength)) {
+                        throw IllegalStateException("Download for $songId is incomplete")
+                    }
 
                     query {
                         Database.insert(mediaItem)
@@ -1131,7 +1324,8 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         }
 
         fun removeDownload(songId: String) {
-            cache.removeResource(songId)
+            downloadCache.removeResource(songId)
+            knownContentLengths.remove(songId)
         }
 
         fun setBitmapListener(listener: ((Bitmap?) -> Unit)?) {
@@ -1256,6 +1450,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         private const val SleepTimerNotificationId = 1002
         private const val SleepTimerNotificationChannelId = "sleep_timer_channel_id"
 
+        private const val ChunkLength = 512 * 1024L
         private const val MaxStreamUrlRetries = 3
         private const val StreamUrlMaxAgeMs = 30 * 60 * 1000L
         private val StreamRetryHttpStatus = setOf(403, 404, 410)

@@ -1,6 +1,9 @@
 package it.vfsfitvnm.vimusic.ui.styling
 
 import android.graphics.Bitmap
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.SaverScope
@@ -48,6 +51,20 @@ data class ColorPalette(
             )
     }
 }
+
+private val colorPaletteAnimationSpec = tween<Color>(durationMillis = 600)
+
+@Composable
+fun animatedColorPalette(target: ColorPalette): ColorPalette = target.copy(
+    background0 = animateColorAsState(target.background0, colorPaletteAnimationSpec).value,
+    background1 = animateColorAsState(target.background1, colorPaletteAnimationSpec).value,
+    background2 = animateColorAsState(target.background2, colorPaletteAnimationSpec).value,
+    accent = animateColorAsState(target.accent, colorPaletteAnimationSpec).value,
+    onAccent = animateColorAsState(target.onAccent, colorPaletteAnimationSpec).value,
+    text = animateColorAsState(target.text, colorPaletteAnimationSpec).value,
+    textSecondary = animateColorAsState(target.textSecondary, colorPaletteAnimationSpec).value,
+    textDisabled = animateColorAsState(target.textDisabled, colorPaletteAnimationSpec).value,
+)
 
 val DefaultDarkColorPalette = ColorPalette(
     background0 = Color(0xff16171d),

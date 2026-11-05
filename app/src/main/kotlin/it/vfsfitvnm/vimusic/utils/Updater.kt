@@ -248,6 +248,27 @@ object Updater {
         }.getOrDefault(false)
     }
 
+    /** Opens the release APK directly in the browser as a fallback to the in-app installer. */
+    fun openDownloadInBrowser(context: Context, info: UpdateInfo): Boolean {
+        val url = info.apkUrl.ifBlank { info.pageUrl }
+        if (url.isBlank()) {
+            AppLog.w("Update", "No release URL available to open in browser")
+            return false
+        }
+
+        return runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
+            AppLog.i("Update", "Opening release download in browser for v${info.versionName}")
+            true
+        }.onFailure {
+            AppLog.e("Update", "Could not open browser: ${it.message}", it)
+        }.getOrDefault(false)
+    }
+
     internal fun isNewer(remote: String, local: String): Boolean = compare(remote, local) > 0
 
     /** Compares dotted versions numerically, returning a positive number when [a] is newer. */

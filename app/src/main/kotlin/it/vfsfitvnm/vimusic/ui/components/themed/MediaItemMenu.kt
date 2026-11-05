@@ -96,7 +96,8 @@ fun InHistoryMediaItemMenu(
                 onDismiss()
                 query {
                     // Not sure we can to this here
-                    binder?.cache?.removeResource(song.id)
+                    binder?.downloadCache?.removeResource(song.id)
+                    binder?.playerCache?.removeResource(song.id)
                     Database.incrementTotalPlayTimeMs(song.id, -song.totalPlayTimeMs)
                 }
             }

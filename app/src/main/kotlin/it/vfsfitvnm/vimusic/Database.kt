@@ -281,6 +281,18 @@ interface Database {
     @Query("SELECT * FROM Format WHERE songId = :songId")
     fun format(songId: String): Flow<Format?>
 
+    @Query("SELECT * FROM Format WHERE songId = :songId LIMIT 1")
+    fun formatOnce(songId: String): Format?
+
+    @Query("UPDATE Format SET contentLength = :contentLength WHERE songId = :songId AND contentLength IS NULL")
+    fun setContentLengthIfNull(songId: String, contentLength: Long): Int
+
+    @Transaction
+    fun insertResolvedFormat(format: Format) {
+        val existingContentLength = formatOnce(format.songId)?.contentLength
+        insert(format.copy(contentLength = existingContentLength ?: format.contentLength))
+    }
+
     @Transaction
     @Query("SELECT Song.*, contentLength FROM Song JOIN Format ON id = songId WHERE contentLength IS NOT NULL ORDER BY Song.ROWID DESC")
     fun songsWithContentLength(): Flow<List<SongWithContentLength>>

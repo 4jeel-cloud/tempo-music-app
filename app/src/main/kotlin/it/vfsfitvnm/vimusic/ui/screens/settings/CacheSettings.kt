@@ -60,7 +60,7 @@ fun CacheSettings() {
     ) {
         Header(title = "Cache")
 
-        SettingsDescription(text = "When the cache runs out of space, the resources that haven't been accessed for the longest time are cleared")
+        SettingsDescription(text = "Playback cache entries are cleared when the cache runs out of space. Downloads are kept until you remove them")
 
         Coil.imageLoader(context).diskCache?.let { diskCache ->
             val diskCacheSize = remember(diskCache) {
@@ -87,16 +87,32 @@ fun CacheSettings() {
             )
         }
 
-        binder?.cache?.let { cache ->
-            val diskCacheSize by remember {
+        binder?.downloadCache?.let { downloadCache ->
+            val downloadSize by remember {
                 derivedStateOf {
-                    cache.cacheSpace
+                    downloadCache.cacheSpace
                 }
             }
 
             SettingsGroupSpacer()
 
-            SettingsEntryGroupText(title = "SONG CACHE")
+            SettingsEntryGroupText(title = "DOWNLOADS")
+
+            SettingsDescription(
+                text = "${Formatter.formatShortFileSize(context, downloadSize)} used"
+            )
+        }
+
+        binder?.playerCache?.let { playerCache ->
+            val diskCacheSize by remember {
+                derivedStateOf {
+                    playerCache.cacheSpace
+                }
+            }
+
+            SettingsGroupSpacer()
+
+            SettingsEntryGroupText(title = "PLAYBACK CACHE")
 
             SettingsDescription(
                 text = buildString {

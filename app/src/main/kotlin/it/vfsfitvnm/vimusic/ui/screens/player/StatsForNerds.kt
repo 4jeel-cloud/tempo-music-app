@@ -61,8 +61,12 @@ fun StatsForNerds(
         enter = fadeIn(),
         exit = fadeOut(),
     ) {
+        var downloadedBytes by remember(mediaId) {
+            mutableStateOf(binder.downloadCache.getCachedBytes(mediaId, 0, -1))
+        }
+
         var cachedBytes by remember(mediaId) {
-            mutableStateOf(binder.cache.getCachedBytes(mediaId, 0, -1))
+            mutableStateOf(binder.playerCache.getCachedBytes(mediaId, 0, -1))
         }
 
         var format by remember {
@@ -78,7 +82,7 @@ fun StatsForNerds(
                             Innertube.player(PlayerBody(videoId = mediaId))?.onSuccess { response ->
                                 response.streamingData?.highestQualityFormat?.let { format ->
                                     Database.insert(mediaItem)
-                                    Database.insert(
+                                    Database.insertResolvedFormat(
                                         Format(
                                             songId = mediaId,
                                             itag = format.itag,
@@ -100,7 +104,20 @@ fun StatsForNerds(
         }
 
         DisposableEffect(mediaId) {
-            val listener = object : Cache.Listener {
+            val downloadListener = object : Cache.Listener {
+                override fun onSpanAdded(cache: Cache, span: CacheSpan) {
+                    downloadedBytes += span.length
+                }
+
+                override fun onSpanRemoved(cache: Cache, span: CacheSpan) {
+                    downloadedBytes -= span.length
+                }
+
+                override fun onSpanTouched(cache: Cache, oldSpan: CacheSpan, newSpan: CacheSpan) =
+                    Unit
+            }
+
+            val playerCacheListener = object : Cache.Listener {
                 override fun onSpanAdded(cache: Cache, span: CacheSpan) {
                     cachedBytes += span.length
                 }
@@ -113,10 +130,12 @@ fun StatsForNerds(
                     Unit
             }
 
-            binder.cache.addListener(mediaId, listener)
+            binder.downloadCache.addListener(mediaId, downloadListener)
+            binder.playerCache.addListener(mediaId, playerCacheListener)
 
             onDispose {
-                binder.cache.removeListener(mediaId, listener)
+                binder.downloadCache.removeListener(mediaId, downloadListener)
+                binder.playerCache.removeListener(mediaId, playerCacheListener)
             }
         }
 
@@ -156,6 +175,10 @@ fun StatsForNerds(
                         style = typography.xs.medium.color(colorPalette.onOverlay)
                     )
                     BasicText(
+                        text = "Downloaded",
+                        style = typography.xs.medium.color(colorPalette.onOverlay)
+                    )
+                    BasicText(
                         text = "Cached",
                         style = typography.xs.medium.color(colorPalette.onOverlay)
                     )
@@ -184,6 +207,17 @@ fun StatsForNerds(
                     BasicText(
                         text = format?.contentLength
                             ?.let { Formatter.formatShortFileSize(context, it) } ?: "Unknown",
+                        maxLines = 1,
+                        style = typography.xs.medium.color(colorPalette.onOverlay)
+                    )
+                    BasicText(
+                        text = buildString {
+                            append(Formatter.formatShortFileSize(context, downloadedBytes))
+
+                            format?.contentLength?.let {
+                                append(" (${(downloadedBytes.toFloat() / it * 100).roundToInt()}%)")
+                            }
+                        },
                         maxLines = 1,
                         style = typography.xs.medium.color(colorPalette.onOverlay)
                     )

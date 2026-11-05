@@ -52,7 +52,7 @@ class PlayerMediaBrowserService : MediaBrowserService(), ServiceConnection {
         if (service is PlayerService.Binder) {
             bound = true
             sessionToken = service.mediaSession.sessionToken
-            service.mediaSession.setCallback(SessionCallback(service.player, service.cache))
+            service.mediaSession.setCallback(SessionCallback(service.player, service.downloadCache))
         }
     }
 

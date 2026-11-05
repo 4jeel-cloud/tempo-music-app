@@ -81,6 +81,7 @@ import it.vfsfitvnm.vimusic.ui.screens.playlistRoute
 import it.vfsfitvnm.vimusic.ui.styling.Appearance
 import it.vfsfitvnm.vimusic.ui.styling.Dimensions
 import it.vfsfitvnm.vimusic.ui.styling.LocalAppearance
+import it.vfsfitvnm.vimusic.ui.styling.animatedColorPalette
 import it.vfsfitvnm.vimusic.ui.styling.colorPaletteOf
 import it.vfsfitvnm.vimusic.ui.styling.dynamicColorPaletteOf
 import it.vfsfitvnm.vimusic.ui.styling.typographyOf
@@ -296,19 +297,25 @@ class MainActivity : ComponentActivity(), PersistMapOwner {
                 }
             }
 
+            val animatedPalette = animatedColorPalette(appearance.colorPalette)
+            val animatedAppearance = appearance.copy(
+                colorPalette = animatedPalette,
+                typography = appearance.typography.copy(animatedPalette.text)
+            )
+
             val rippleTheme =
-                remember(appearance.colorPalette.text, appearance.colorPalette.isDark) {
+                remember(animatedPalette.text, animatedPalette.isDark) {
                     object : RippleTheme {
                         @Composable
                         override fun defaultColor(): Color = RippleTheme.defaultRippleColor(
-                            contentColor = appearance.colorPalette.text,
-                            lightTheme = !appearance.colorPalette.isDark
+                            contentColor = animatedPalette.text,
+                            lightTheme = !animatedPalette.isDark
                         )
 
                         @Composable
                         override fun rippleAlpha(): RippleAlpha = RippleTheme.defaultRippleAlpha(
-                            contentColor = appearance.colorPalette.text,
-                            lightTheme = !appearance.colorPalette.isDark
+                            contentColor = animatedPalette.text,
+                            lightTheme = !animatedPalette.isDark
                         )
                     }
                 }
@@ -334,7 +341,7 @@ class MainActivity : ComponentActivity(), PersistMapOwner {
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(appearance.colorPalette.background0)
+                    .background(animatedPalette.background0)
             ) {
                 val density = LocalDensity.current
                 val windowsInsets = WindowInsets.systemBars
@@ -357,7 +364,7 @@ class MainActivity : ComponentActivity(), PersistMapOwner {
                 }
 
                 CompositionLocalProvider(
-                    LocalAppearance provides appearance,
+                    LocalAppearance provides animatedAppearance,
                     LocalIndication provides rememberRipple(bounded = true),
                     LocalRippleTheme provides rippleTheme,
                     LocalShimmerTheme provides shimmerTheme,
