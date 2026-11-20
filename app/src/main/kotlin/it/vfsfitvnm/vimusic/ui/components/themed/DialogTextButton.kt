@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import it.vfsfitvnm.vimusic.ui.styling.LocalAppearance
 import it.vfsfitvnm.vimusic.utils.color
@@ -21,6 +22,7 @@ fun DialogTextButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     primary: Boolean = false,
+    textAlign: TextAlign = TextAlign.Start,
 ) {
     val (colorPalette, typography) = LocalAppearance.current
 
@@ -32,7 +34,7 @@ fun DialogTextButton(
 
     BasicText(
         text = text,
-        style = typography.xs.medium.color(textColor),
+        style = typography.xs.medium.color(textColor).copy(textAlign = textAlign),
         modifier = modifier
             .clip(RoundedCornerShape(36.dp))
             .background(if (primary) colorPalette.accent else Color.Transparent)

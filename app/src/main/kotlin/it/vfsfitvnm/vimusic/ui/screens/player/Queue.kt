@@ -15,6 +15,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
@@ -64,7 +65,9 @@ import it.vfsfitvnm.vimusic.ui.components.BottomSheet
 import it.vfsfitvnm.vimusic.ui.components.BottomSheetState
 import it.vfsfitvnm.vimusic.ui.components.LocalMenuState
 import it.vfsfitvnm.vimusic.ui.components.MusicBars
+import it.vfsfitvnm.vimusic.ui.components.themed.ConfirmationDialog
 import it.vfsfitvnm.vimusic.ui.components.themed.FloatingActionsContainerWithScrollToTop
+import it.vfsfitvnm.vimusic.ui.components.themed.HeaderIconButton
 import it.vfsfitvnm.vimusic.ui.components.themed.IconButton
 import it.vfsfitvnm.vimusic.ui.components.themed.QueuedMediaItemMenu
 import it.vfsfitvnm.vimusic.ui.items.SongItem
@@ -129,6 +132,10 @@ fun Queue(
         val player = binder.player
 
         var queueLoopEnabled by rememberPreference(queueLoopEnabledKey, defaultValue = true)
+
+        var isShowingClearQueueDialog by remember {
+            mutableStateOf(false)
+        }
 
         val menuState = LocalMenuState.current
 
@@ -330,17 +337,36 @@ fun Queue(
                     .padding(horizontalBottomPaddingValues)
                     .height(64.dp)
             ) {
-                BasicText(
-                    text = "${windows.size} songs",
-                    style = typography.xxs.medium,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier
+                        .clickable(enabled = windows.size > 1) { isShowingClearQueueDialog = true }
                         .background(
                             color = colorPalette.background1,
                             shape = RoundedCornerShape(16.dp)
                         )
                         .align(Alignment.CenterStart)
-                        .padding(all = 8.dp)
-                )
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    BasicText(
+                        text = "${windows.size} songs",
+                        style = typography.xxs.medium,
+                    )
+
+                    BasicText(
+                        text = "Clear",
+                        style = typography.xxs.medium.copy(color = if (windows.size > 1) colorPalette.text else colorPalette.textDisabled),
+                    )
+
+                    HeaderIconButton(
+                        icon = R.drawable.trash,
+                        color = if (windows.size > 1) colorPalette.text else colorPalette.textDisabled,
+                        enabled = windows.size > 1,
+                        indication = rememberRipple(bounded = true),
+                        onClick = { isShowingClearQueueDialog = true }
+                    )
+                }
 
                 Image(
                     painter = painterResource(R.drawable.chevron_down),
@@ -382,6 +408,28 @@ fun Queue(
                         )
                     }
                 }
+            }
+
+            if (isShowingClearQueueDialog) {
+                ConfirmationDialog(
+                    text = "Clear the queue? The current song will keep playing.",
+                    confirmText = "Clear",
+                    onDismiss = { isShowingClearQueueDialog = false },
+                    onConfirm = {
+                        binder.stopRadio()
+
+                        val currentIndex = player.currentMediaItemIndex
+                        if (currentIndex in 0 until player.mediaItemCount) {
+                            if (currentIndex > 0) {
+                                player.removeMediaItems(0, currentIndex)
+                            }
+
+                            if (player.mediaItemCount > 1) {
+                                player.removeMediaItems(1, player.mediaItemCount)
+                            }
+                        }
+                    }
+                )
             }
         }
     }

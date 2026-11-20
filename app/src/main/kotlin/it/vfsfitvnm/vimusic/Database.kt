@@ -287,6 +287,9 @@ interface Database {
     @Query("UPDATE Format SET contentLength = :contentLength WHERE songId = :songId AND contentLength IS NULL")
     fun setContentLengthIfNull(songId: String, contentLength: Long): Int
 
+    @Query("UPDATE Format SET contentLength = NULL WHERE songId = :songId")
+    fun clearDownloadedContentLength(songId: String): Int
+
     @Transaction
     fun insertResolvedFormat(format: Format) {
         val existingContentLength = formatOnce(format.songId)?.contentLength
@@ -378,9 +381,9 @@ interface Database {
     fun insert(mediaItem: MediaItem, block: (Song) -> Song = { it }) {
         val song = Song(
             id = mediaItem.mediaId,
-            title = mediaItem.mediaMetadata.title!!.toString(),
+            title = mediaItem.mediaMetadata.title?.toString().orEmpty(),
             artistsText = mediaItem.mediaMetadata.artist?.toString(),
-            durationText = mediaItem.mediaMetadata.extras?.getString("durationText"),
+            durationText = mediaItem.mediaMetadata.extras?.getString("durationText").orEmpty(),
             thumbnailUrl = mediaItem.mediaMetadata.artworkUri?.toString()
         ).let(block).also { song ->
             if (insert(song) == -1L) return

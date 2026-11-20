@@ -315,6 +315,7 @@ fun MediaItemMenu(
     }
 
     LaunchedEffect(mediaItem.mediaId) {
+        downloadedContentLength = null
         withContext(Dispatchers.IO) {
             Database.format(mediaItem.mediaId).collect { downloadedContentLength = it?.contentLength }
         }

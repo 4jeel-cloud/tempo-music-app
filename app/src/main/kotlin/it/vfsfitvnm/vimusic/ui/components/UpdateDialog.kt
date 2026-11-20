@@ -1,6 +1,7 @@
 package it.vfsfitvnm.vimusic.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -14,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
@@ -104,32 +106,13 @@ fun UpdateDialog(
             UpdateState.Available -> Unit
         }
 
-        Row(
-            horizontalArrangement = Arrangement.SpaceEvenly,
+        Column(
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 8.dp)
         ) {
-            if (!downloading) {
-                DialogTextButton(
-                    text = if (state is UpdateState.Failed) "Close" else "Later",
-                    onClick = onDismiss
-                )
-            }
-
-            if (!downloading && state !is UpdateState.Installing) {
-                DialogTextButton(
-                    text = "Browser",
-                    onClick = {
-                        if (Updater.openDownloadInBrowser(context, info)) {
-                            onDismiss()
-                        } else {
-                            state = UpdateState.Failed("Couldn't open a browser. Visit ${info.pageUrl} manually.")
-                        }
-                    }
-                )
-            }
-
             DialogTextButton(
                 primary = true,
                 enabled = !downloading && state !is UpdateState.Installing,
@@ -139,6 +122,8 @@ fun UpdateDialog(
                     is UpdateState.Failed -> "Retry"
                     UpdateState.Available -> "Update"
                 },
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
                 onClick = {
                     if (downloading || state is UpdateState.Installing) return@DialogTextButton
                     state = UpdateState.Downloading(0)
@@ -162,6 +147,37 @@ fun UpdateDialog(
                     }
                 }
             )
+
+            if (!downloading) {
+                val showBrowser = state !is UpdateState.Installing
+
+                Row(
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    DialogTextButton(
+                        text = if (state is UpdateState.Failed) "Close" else "Later",
+                        textAlign = TextAlign.Center,
+                        modifier = if (showBrowser) Modifier.weight(1f) else Modifier,
+                        onClick = onDismiss
+                    )
+
+                    if (showBrowser) {
+                        DialogTextButton(
+                            text = "Browser",
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                if (Updater.openDownloadInBrowser(context, info)) {
+                                    onDismiss()
+                                } else {
+                                    state = UpdateState.Failed("Couldn't open a browser. Visit ${info.pageUrl} manually.")
+                                }
+                            }
+                        )
+                    }
+                }
+            }
         }
 
         BasicText(

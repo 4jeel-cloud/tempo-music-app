@@ -25,13 +25,18 @@ import android.media.audiofx.LoudnessEnhancer
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.net.Uri
+import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.text.format.DateUtils
+import android.util.TypedValue
+import android.widget.RemoteViews
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.ContextCompat.startForegroundService
 import androidx.core.content.getSystemService
 import androidx.core.net.toUri
@@ -74,6 +79,7 @@ import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.mkv.MatroskaExtractor
 import androidx.media3.extractor.mp4.FragmentedMp4Extractor
+import androidx.room.withTransaction
 import it.vfsfitvnm.innertube.Innertube
 import it.vfsfitvnm.innertube.models.NavigationEndpoint
 import it.vfsfitvnm.innertube.models.bodies.PlayerBody
@@ -82,7 +88,9 @@ import it.vfsfitvnm.vimusic.Database
 import it.vfsfitvnm.vimusic.MainActivity
 import it.vfsfitvnm.vimusic.R
 import it.vfsfitvnm.vimusic.enums.ExoPlayerDiskCacheMaxSize
+import it.vfsfitvnm.vimusic.internal
 import it.vfsfitvnm.vimusic.models.Event
+import it.vfsfitvnm.vimusic.models.Format
 import it.vfsfitvnm.vimusic.models.QueuedMediaItem
 import it.vfsfitvnm.vimusic.query
 import it.vfsfitvnm.vimusic.utils.AppLog
@@ -128,6 +136,7 @@ import kotlin.system.exitProcess
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
@@ -150,18 +159,16 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
     private val sanitizedDownloadCacheKeys = ConcurrentHashMap.newKeySet<String>()
     private lateinit var player: ExoPlayer
 
-    private val stateBuilder = PlaybackState.Builder()
-        .setActions(
-            PlaybackState.ACTION_PLAY
-                    or PlaybackState.ACTION_PAUSE
-                    or PlaybackState.ACTION_PLAY_PAUSE
-                    or PlaybackState.ACTION_STOP
-                    or PlaybackState.ACTION_SKIP_TO_PREVIOUS
-                    or PlaybackState.ACTION_SKIP_TO_NEXT
-                    or PlaybackState.ACTION_SKIP_TO_QUEUE_ITEM
-                    or PlaybackState.ACTION_SEEK_TO
-                    or PlaybackState.ACTION_REWIND
-        )
+    private val playbackStateActions =
+        PlaybackState.ACTION_PLAY or
+            PlaybackState.ACTION_PAUSE or
+            PlaybackState.ACTION_PLAY_PAUSE or
+            PlaybackState.ACTION_STOP or
+            PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+            PlaybackState.ACTION_SKIP_TO_NEXT or
+            PlaybackState.ACTION_SKIP_TO_QUEUE_ITEM or
+            PlaybackState.ACTION_SEEK_TO or
+            PlaybackState.ACTION_REWIND
 
     private val metadataBuilder = MediaMetadata.Builder()
 
@@ -189,6 +196,12 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
     private val binder = Binder()
 
     private var isNotificationStarted = false
+
+    @Volatile
+    private var isCurrentSongLiked = false
+
+    @Volatile
+    private var isDestroyed = false
 
     override val notificationId: Int
         get() = NotificationId
@@ -303,21 +316,22 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         player.addListener(this)
         player.addAnalyticsListener(PlaybackStatsListener(false, this))
 
-        maybeRestorePlayerQueue()
-
         mediaSession = MediaSession(baseContext, "PlayerService")
         mediaSession.setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
-        mediaSession.setCallback(SessionCallback(player))
-        mediaSession.setPlaybackState(stateBuilder.build())
+        mediaSession.setCallback(SessionCallback())
+        updateMediaSessionState()
         mediaSession.isActive = true
 
-        notificationActionReceiver = NotificationActionReceiver(player)
+        maybeRestorePlayerQueue()
+
+        notificationActionReceiver = NotificationActionReceiver()
 
         val filter = IntentFilter().apply {
             addAction(Action.play.value)
             addAction(Action.pause.value)
             addAction(Action.next.value)
             addAction(Action.previous.value)
+            addAction(Action.like.value)
         }
 
         registerReceiverCompat(notificationActionReceiver, filter)
@@ -349,13 +363,16 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
     override fun onDestroy() {
         maybeSavePlayerQueue()
 
+        isDestroyed = true
+        coroutineScope.cancel()
+
         preferences.unregisterOnSharedPreferenceChangeListener(this)
 
         player.removeListener(this)
         player.stop()
         player.release()
 
-        unregisterReceiver(notificationActionReceiver)
+        runCatching { unregisterReceiver(notificationActionReceiver) }
 
         isRunning = false
         widgetProgressJob?.cancel()
@@ -702,11 +719,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
             )
         }
 
-        stateBuilder
-            .setState(player.androidPlaybackState, player.currentPosition, 1f)
-            .setBufferedPosition(player.bufferedPosition)
-
-        mediaSession.setPlaybackState(stateBuilder.build())
+        updateMediaSessionState()
 
         if (events.containsAny(
                 Player.EVENT_PLAYBACK_STATE_CHANGED,
@@ -746,7 +759,63 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         }
     }
 
+    private fun updateMediaSessionState() {
+        if (isDestroyed || !::mediaSession.isInitialized || !::player.isInitialized) return
+
+        mediaSession.setPlaybackState(
+            PlaybackState.Builder()
+                .setActions(playbackStateActions)
+                .setState(player.androidPlaybackState, player.currentPosition, 1f)
+                .setBufferedPosition(player.bufferedPosition)
+                .addCustomAction(
+                    PlaybackState.CustomAction.Builder(
+                        Action.like.value,
+                        getString(if (isCurrentSongLiked) R.string.unlike else R.string.like),
+                        if (isCurrentSongLiked) R.drawable.heart else R.drawable.heart_outline
+                    ).build()
+                )
+                .build()
+        )
+    }
+
+    private fun likeCurrentItem() {
+        coroutineScope.launch(Dispatchers.Main.immediate) {
+            if (isDestroyed || !::player.isInitialized) return@launch
+            player.currentMediaItem?.let { toggleLike(it) }
+        }
+    }
+
+    private suspend fun toggleLike(mediaItem: MediaItem) {
+        val isLiked = withContext(Dispatchers.IO) {
+            runCatching { Database.likedAt(mediaItem.mediaId).first() != null }
+                .getOrDefault(false)
+        }
+        val newLikedAt = if (isLiked) null else System.currentTimeMillis()
+
+        val updated = withContext(Dispatchers.IO) {
+            runCatching {
+                if (Database.like(mediaItem.mediaId, newLikedAt) == 0) {
+                    Database.insert(mediaItem) { it.copy(likedAt = newLikedAt) }
+                }
+                true
+            }.getOrElse { throwable ->
+                AppLog.e("Like", "Failed to update like state for ${mediaItem.mediaId}", throwable)
+                false
+            }
+        }
+
+        if (!updated) {
+            toast("Could not update like")
+            return
+        }
+
+        if (isDestroyed) return
+        updateWidgets()
+    }
+
     private fun updateWidgets() {
+        if (isDestroyed || !::player.isInitialized) return
+
         val mediaItem = player.currentMediaItem
         val title = player.mediaMetadata.title?.toString()
         if (mediaItem == null || title.isNullOrBlank()) {
@@ -763,9 +832,22 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         val songId = mediaItem.mediaId
 
         coroutineScope.launch {
+            if (isDestroyed) return@launch
+
             val isLiked = runCatching { Database.likedAt(songId).first() != null }.getOrDefault(false)
+            val likeStateChanged = isLiked != isCurrentSongLiked
+            isCurrentSongLiked = isLiked
+
             WidgetState.update(title, artist, artworkUri, isPlaying, isLiked, duration, position, songId)
             WidgetRefresh.updatePlayback(this@PlayerService)
+
+            if (likeStateChanged) {
+                withContext(Dispatchers.Main) {
+                    if (isDestroyed) return@withContext
+                    updateMediaSessionState()
+                    notification()?.let { notificationManager?.notify(NotificationId, it) }
+                }
+            }
         }
     }
 
@@ -798,14 +880,46 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
     }
 
     override fun notification(): Notification? {
-        if (player.currentMediaItem == null) return null
+        val mediaItem = player.currentMediaItem ?: return null
+        val songId = mediaItem.mediaId
+        val artworkUri = player.mediaMetadata.artworkUri
 
-        val playIntent = Action.play.pendingIntent
-        val pauseIntent = Action.pause.pendingIntent
-        val nextIntent = Action.next.pendingIntent
-        val prevIntent = Action.previous.pendingIntent
+        val notification = buildNotification(bitmapProvider.bitmap)
 
+        bitmapProvider.load(artworkUri) { bitmap ->
+            maybeShowSongCoverInLockScreen()
+
+            if (player.currentMediaItem?.mediaId == songId &&
+                player.mediaMetadata.artworkUri == artworkUri
+            ) {
+                notificationManager?.notify(NotificationId, buildNotification(bitmap))
+            }
+        }
+
+        return notification
+    }
+
+    private fun buildNotification(artwork: Bitmap?): Notification {
         val mediaMetadata = player.mediaMetadata
+        val isPlaying = player.shouldBePlaying
+        val isLiked = isCurrentSongLiked
+
+        val contentIntent = activityPendingIntent<MainActivity>(
+            flags = PendingIntent.FLAG_UPDATE_CURRENT
+        ) {
+            putExtra("expandPlayerBottomSheet", true)
+        }
+
+        val notificationViews = RemoteViews(packageName, R.layout.notification_mini_player)
+        bindNotificationViews(
+            views = notificationViews,
+            contentIntent = contentIntent,
+            title = mediaMetadata.title,
+            artist = mediaMetadata.artist,
+            artwork = artwork,
+            isPlaying = isPlaying,
+            isLiked = isLiked
+        )
 
         val builder = if (isAtLeastAndroid8) {
             Notification.Builder(applicationContext, NotificationChannelId)
@@ -815,40 +929,126 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
             .setContentTitle(mediaMetadata.title)
             .setContentText(mediaMetadata.artist)
             .setSubText(player.playerError?.message)
-            .setLargeIcon(bitmapProvider.bitmap)
+            .setLargeIcon(artwork)
             .setAutoCancel(false)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
             .setSmallIcon(player.playerError?.let { R.drawable.alert_circle }
                 ?: R.drawable.app_icon)
             .setOngoing(false)
-            .setContentIntent(activityPendingIntent<MainActivity>(
-                flags = PendingIntent.FLAG_UPDATE_CURRENT
-            ) {
-                putExtra("expandPlayerBottomSheet", true)
-            })
+            .setContentIntent(contentIntent)
             .setDeleteIntent(broadCastPendingIntent<NotificationDismissReceiver>())
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-            .setStyle(
-                Notification.MediaStyle()
-                    .setShowActionsInCompactView(0, 1, 2)
-                    .setMediaSession(mediaSession.sessionToken)
-            )
-            .addAction(R.drawable.play_skip_back, "Skip back", prevIntent)
+            .setStyle(notificationStyle())
             .addAction(
-                if (player.shouldBePlaying) R.drawable.pause else R.drawable.play,
-                if (player.shouldBePlaying) "Pause" else "Play",
-                if (player.shouldBePlaying) pauseIntent else playIntent
+                if (isLiked) R.drawable.heart else R.drawable.heart_outline,
+                if (isLiked) "Unlike" else "Like",
+                Action.like.pendingIntent
             )
-            .addAction(R.drawable.play_skip_forward, "Skip forward", nextIntent)
+            .addAction(R.drawable.play_skip_back, "Skip back", Action.previous.pendingIntent)
+            .addAction(
+                if (isPlaying) R.drawable.pause else R.drawable.play,
+                if (isPlaying) "Pause" else "Play",
+                if (isPlaying) Action.pause.pendingIntent else Action.play.pendingIntent
+            )
+            .addAction(
+                R.drawable.play_skip_forward,
+                "Skip forward",
+                Action.next.pendingIntent
+            )
 
-        bitmapProvider.load(mediaMetadata.artworkUri) { bitmap ->
-            maybeShowSongCoverInLockScreen()
-            notificationManager?.notify(NotificationId, builder.setLargeIcon(bitmap).build())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            builder.setCustomContentView(notificationViews)
+        } else {
+            builder.setContent(notificationViews)
         }
 
         return builder.build()
+    }
+
+    private fun notificationStyle(): Notification.Style {
+        val sessionToken = mediaSession.sessionToken
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            Notification.DecoratedMediaCustomViewStyle()
+                .setShowActionsInCompactView(0, 1, 2)
+                .setMediaSession(sessionToken)
+        } else {
+            Notification.MediaStyle()
+                .setShowActionsInCompactView(0, 1, 2)
+                .setMediaSession(sessionToken)
+        }
+    }
+
+    private fun bindNotificationViews(
+        views: RemoteViews,
+        contentIntent: PendingIntent,
+        title: CharSequence?,
+        artist: CharSequence?,
+        artwork: Bitmap?,
+        isPlaying: Boolean,
+        isLiked: Boolean
+    ) {
+        if (artwork != null) {
+            views.setImageViewBitmap(R.id.notification_artwork, artwork)
+        } else {
+            views.setImageViewResource(R.id.notification_artwork, R.mipmap.ic_launcher)
+        }
+
+        views.setTextViewText(R.id.notification_title, title?.toString().orEmpty())
+        views.setTextViewText(R.id.notification_artist, artist?.toString().orEmpty())
+
+        views.setImageViewResource(
+            R.id.notification_like,
+            if (isLiked) R.drawable.heart else R.drawable.heart_outline
+        )
+        views.setImageViewResource(R.id.notification_previous, R.drawable.play_skip_back)
+        views.setImageViewResource(
+            R.id.notification_play_pause,
+            if (isPlaying) R.drawable.pause else R.drawable.play
+        )
+        views.setImageViewResource(R.id.notification_next, R.drawable.play_skip_forward)
+
+        val iconColor = notificationIconColor()
+        listOf(
+            R.id.notification_like,
+            R.id.notification_previous,
+            R.id.notification_play_pause,
+            R.id.notification_next
+        ).forEach { id ->
+            views.setInt(id, "setColorFilter", iconColor)
+        }
+
+        views.setContentDescription(
+            R.id.notification_like,
+            getString(if (isLiked) R.string.unlike else R.string.like)
+        )
+        views.setContentDescription(
+            R.id.notification_play_pause,
+            getString(if (isPlaying) R.string.pause else R.string.play)
+        )
+
+        views.setOnClickPendingIntent(R.id.notification_root, contentIntent)
+        views.setOnClickPendingIntent(R.id.notification_like, Action.like.pendingIntent)
+        views.setOnClickPendingIntent(R.id.notification_previous, Action.previous.pendingIntent)
+        views.setOnClickPendingIntent(
+            R.id.notification_play_pause,
+            if (isPlaying) Action.pause.pendingIntent else Action.play.pendingIntent
+        )
+        views.setOnClickPendingIntent(R.id.notification_next, Action.next.pendingIntent)
+    }
+
+    private fun notificationIconColor(): Int {
+        val value = TypedValue()
+        if (!theme.resolveAttribute(android.R.attr.colorControlNormal, value, true)) {
+            return Color.WHITE
+        }
+
+        return if (value.type == TypedValue.TYPE_REFERENCE) {
+            runCatching { ContextCompat.getColor(this, value.resourceId) }.getOrDefault(Color.WHITE)
+        } else {
+            value.data
+        }
     }
 
     private fun createNotificationChannel() {
@@ -1017,6 +1217,17 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         }
     }
 
+    private fun clearDownloadCacheEntry(songId: String) {
+        runCatching {
+            downloadCache.removeResource(songId)
+            knownContentLengths.remove(songId)
+            clearCacheContentLength(downloadCache, songId)
+            sanitizedDownloadCacheKeys.remove(songId)
+        }.onFailure {
+            AppLog.e("Download", "Failed to clear cached data for $songId", it)
+        }
+    }
+
     private fun sanitizePlaybackCaches(key: String) {
         if (sanitizedPlayerCacheKeys.add(key)) {
             clearCacheContentLength(playerCache, key)
@@ -1040,26 +1251,20 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         }
     }
 
-    private fun knownContentLength(key: String): Long? {
-        knownContentLengths[key]?.let { return it }
-
-        cacheContentLength(downloadCache, key)?.let {
-            knownContentLengths[key] = it
-            return it
-        }
-
-        return runCatching {
-            runBlocking(Dispatchers.IO) { Database.formatOnce(key)?.contentLength }
-        }.getOrNull()
-            ?.takeIf { it > 0 }
-            ?.also { knownContentLengths[key] = it }
-    }
-
     private fun createHttpDataSourceFactory(): DataSource.Factory =
         DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(16000)
             .setReadTimeoutMs(8000)
             .setUserAgent("Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0")
+
+    private fun createDownloadHttpDataSourceFactory(): DataSource.Factory =
+        DefaultHttpDataSource.Factory()
+            .setConnectTimeoutMs(16000)
+            .setReadTimeoutMs(8000)
+            .setUserAgent(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+            )
 
     private fun createPlayerCacheDataSourceFactory(): DataSource.Factory =
         CacheDataSource.Factory()
@@ -1244,88 +1449,176 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         val downloadingIds = mutableStateListOf<String>()
 
         fun isDownloaded(songId: String, contentLength: Long?): Boolean {
-            val length = contentLength ?: knownContentLength(songId) ?: return false
-            return downloadCache.isCached(songId, 0, length)
+            val length = contentLength?.takeIf { it > 0 } ?: return false
+            val cachedLength = runCatching {
+                downloadCache.getCachedBytes(songId, 0, length)
+            }.getOrDefault(0L)
+
+            return cachedLength >= length && downloadCache.isCached(songId, 0, length)
         }
+
+        fun toggleLikeFromMediaSession() = this@PlayerService.likeCurrentItem()
+
+        fun isSongDownloaded(songId: String, contentLength: Long?) =
+            this@PlayerService.binder.isDownloaded(songId, contentLength)
 
         fun download(mediaItem: MediaItem, contentLength: Long?) {
             val songId = mediaItem.mediaId
+            val alreadyDownloading = downloadingIds.contains(songId)
+            val alreadyDownloaded = isDownloaded(songId, contentLength)
 
-            if (downloadingIds.contains(songId) || isDownloaded(songId, contentLength)) return
+            AppLog.d(
+                "Download",
+                "Download requested for $songId " +
+                    "(downloading=$alreadyDownloading, downloaded=$alreadyDownloaded)"
+            )
+
+            if (alreadyDownloading) {
+                coroutineScope.launch(Dispatchers.Main) { toast("Already downloading") }
+                return
+            }
+
+            if (alreadyDownloaded) {
+                coroutineScope.launch(Dispatchers.Main) { toast("Already downloaded") }
+                return
+            }
 
             downloadingIds.add(songId)
 
             coroutineScope.launch {
                 try {
                     AppLog.d("Download", "Downloading $songId")
+                    clearDownloadCacheEntry(songId)
 
-                    val response = Innertube.player(PlayerBody(videoId = songId))?.getOrThrow()
+                    var response = Innertube.player(PlayerBody(videoId = songId))?.getOrThrow()
                         ?: throw IllegalStateException("No player response for $songId")
 
-                    val format = response.streamingData?.highestQualityFormat
+                    var format = response.streamingData?.highestQualityFormat
                         ?: throw IllegalStateException("No playable format for $songId")
 
-                    val url = format.url
+                    var url = format.url
                         ?: throw IllegalStateException("No stream url for $songId")
 
-                    val dataSource = CacheDataSource.Factory()
-                        .setCache(downloadCache)
-                        .setUpstreamDataSourceFactory(createHttpDataSourceFactory())
-                        .createDataSource()
+                    var retries = 0
+                    while (true) {
+                        var dataSource: CacheDataSource? = null
 
-                    CacheWriter(
-                        dataSource,
-                        DataSpec(
-                            url.toUri(),
-                            0L,
-                            C.LENGTH_UNSET.toLong(),
-                            songId
-                        ),
-                        null,
-                        null
-                    ).cache()
+                        try {
+                            dataSource = CacheDataSource.Factory()
+                                .setCache(downloadCache)
+                                .setUpstreamDataSourceFactory(createDownloadHttpDataSourceFactory())
+                                .createDataSource()
+
+                            CacheWriter(
+                                dataSource,
+                                DataSpec(
+                                    url.toUri(),
+                                    0L,
+                                    C.LENGTH_UNSET.toLong(),
+                                    songId
+                                ),
+                                null,
+                                null
+                            ).cache()
+                            break
+                        } catch (exception: HttpDataSource.InvalidResponseCodeException) {
+                            if (exception.responseCode !in StreamRetryHttpStatus || retries >= 2) {
+                                throw exception
+                            }
+
+                            retries++
+                            AppLog.w(
+                                "Download",
+                                "Stream url failed with ${exception.responseCode}; " +
+                                    "re-resolving $songId (attempt $retries)",
+                                exception
+                            )
+
+                            clearDownloadCacheEntry(songId)
+                            response = Innertube.player(PlayerBody(videoId = songId))?.getOrThrow()
+                                ?: throw IllegalStateException("No player response for $songId")
+                            format = response.streamingData?.highestQualityFormat
+                                ?: throw IllegalStateException("No playable format for $songId")
+                            url = format.url
+                                ?: throw IllegalStateException("No stream url for $songId")
+                        } finally {
+                            dataSource?.close()
+                        }
+                    }
 
                     val cachedLength = runCatching {
                         downloadCache.getCachedBytes(songId, 0, Long.MAX_VALUE).takeIf { it > 0 }
                     }.getOrNull() ?: throw IllegalStateException("Nothing was cached for $songId")
 
-                    knownContentLengths[songId] = cachedLength
-                    applyCacheContentLength(downloadCache, songId, cachedLength)
-
-                    if (!downloadCache.isCached(songId, 0, cachedLength)) {
-                        throw IllegalStateException("Download for $songId is incomplete")
-                    }
-
-                    query {
-                        Database.insert(mediaItem)
-
-                        Database.insert(
-                            it.vfsfitvnm.vimusic.models.Format(
-                                songId = songId,
-                                itag = format.itag,
-                                mimeType = format.mimeType,
-                                bitrate = format.bitrate,
-                                loudnessDb = response.playerConfig?.audioConfig?.normalizedLoudnessDb,
-                                contentLength = cachedLength,
-                                lastModified = format.lastModified
-                            )
+                    val expectedLength = format.contentLength?.takeIf { it > 0 }
+                    if (expectedLength != null && cachedLength < expectedLength) {
+                        throw IllegalStateException(
+                            "Download for $songId is incomplete ($cachedLength < $expectedLength)"
                         )
                     }
 
+                    knownContentLengths[songId] = cachedLength
+                    applyCacheContentLength(downloadCache, songId, cachedLength)
+
+                    if (!isDownloaded(songId, cachedLength)) {
+                        throw IllegalStateException("Download for $songId is incomplete")
+                    }
+
+                    val persisted = withContext(Dispatchers.IO) {
+                        runCatching {
+                            Database.internal.withTransaction {
+                                Database.insert(mediaItem)
+
+                                Database.insert(
+                                    Format(
+                                        songId = songId,
+                                        itag = format.itag,
+                                        mimeType = format.mimeType,
+                                        bitrate = format.bitrate,
+                                        loudnessDb = response.playerConfig?.audioConfig?.normalizedLoudnessDb,
+                                        contentLength = cachedLength,
+                                        lastModified = format.lastModified
+                                    )
+                                )
+                            }
+                        }.onFailure { throwable ->
+                            AppLog.e("Download", "Failed to save download metadata for $songId", throwable)
+                        }.isSuccess
+                    }
+
+                    if (!persisted) {
+                        throw IllegalStateException("Could not save download metadata for $songId")
+                    }
+
                     AppLog.i("Download", "Downloaded $songId ($cachedLength bytes)")
-                    withContext(Dispatchers.Main) { toast("Saved to Offline") }
+                    withContext(Dispatchers.Main.immediate) { toast("Saved to Offline") }
                 } catch (t: Throwable) {
                     AppLog.e("Download", "Failed to download $songId", t)
-                    withContext(Dispatchers.Main) { toast("Download failed: ${t.message}") }
+                    withContext(Dispatchers.Main.immediate) { toast("Download failed: ${t.message}") }
                 } finally {
-                    downloadingIds.remove(songId)
+                    withContext(NonCancellable) {
+                        withContext(Dispatchers.Main.immediate) { downloadingIds.remove(songId) }
+                    }
                 }
             }
         }
 
         fun removeDownload(songId: String) {
-            downloadCache.removeResource(songId)
-            knownContentLengths.remove(songId)
+            coroutineScope.launch {
+                val removed = withContext(Dispatchers.IO) {
+                    runCatching {
+                        clearDownloadCacheEntry(songId)
+                        Database.clearDownloadedContentLength(songId)
+                        true
+                    }.onFailure { throwable ->
+                        AppLog.e("Download", "Failed to remove download $songId", throwable)
+                    }.getOrDefault(false)
+                }
+
+                withContext(Dispatchers.Main.immediate) {
+                    toast(if (removed) "Removed from Offline" else "Could not remove download")
+                }
+            }
         }
 
         fun setBitmapListener(listener: ((Bitmap?) -> Unit)?) {
@@ -1393,7 +1686,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         }
     }
 
-    private class SessionCallback(private val player: Player) : MediaSession.Callback() {
+    private inner class SessionCallback : MediaSession.Callback() {
         override fun onPlay() = player.play()
         override fun onPause() = player.pause()
         override fun onSkipToPrevious() = runCatching(player::forceSeekToPrevious).let { }
@@ -1402,15 +1695,21 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
         override fun onStop() = player.pause()
         override fun onRewind() = player.seekToDefaultPosition()
         override fun onSkipToQueueItem(id: Long) = runCatching { player.seekToDefaultPosition(id.toInt()) }.let { }
+
+        override fun onCustomAction(action: String, extras: Bundle?) {
+            if (action != Action.like.value) return
+            likeCurrentItem()
+        }
     }
 
-    private class NotificationActionReceiver(private val player: Player) : BroadcastReceiver() {
+    private inner class NotificationActionReceiver : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 Action.pause.value -> player.pause()
                 Action.play.value -> player.play()
                 Action.next.value -> player.forceSeekToNext()
                 Action.previous.value -> player.forceSeekToPrevious()
+                Action.like.value -> likeCurrentItem()
             }
         }
     }
@@ -1437,6 +1736,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
             val play = Action("it.vfsfitvnm.vimusic.play")
             val next = Action("it.vfsfitvnm.vimusic.next")
             val previous = Action("it.vfsfitvnm.vimusic.previous")
+            val like = Action(LikeAction)
         }
     }
 
@@ -1446,6 +1746,7 @@ class PlayerService : InvincibleService(), Player.Listener, PlaybackStatsListene
 
         private const val NotificationId = 1001
         private const val NotificationChannelId = "default_channel_id"
+        internal const val LikeAction = "it.vfsfitvnm.vimusic.like"
 
         private const val SleepTimerNotificationId = 1002
         private const val SleepTimerNotificationChannelId = "sleep_timer_channel_id"

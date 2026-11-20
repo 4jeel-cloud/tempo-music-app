@@ -66,9 +66,7 @@ fun BuiltInPlaylistSongs(builtInPlaylist: BuiltInPlaylist) {
                 .flowOn(Dispatchers.IO)
                 .map { songs ->
                     songs.filter { song ->
-                        song.contentLength?.let {
-                            binder?.downloadCache?.isCached(song.song.id, 0, song.contentLength)
-                        } ?: false
+                        binder?.isDownloaded(song.song.id, song.contentLength) == true
                     }.map(SongWithContentLength::song)
                 }
         }.collect { songs = it }

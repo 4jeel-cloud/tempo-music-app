@@ -16,7 +16,6 @@ import androidx.annotation.DrawableRes
 import androidx.core.net.toUri
 import androidx.core.os.bundleOf
 import androidx.media3.common.Player
-import androidx.media3.datasource.cache.Cache
 import it.vfsfitvnm.vimusic.Database
 import it.vfsfitvnm.vimusic.R
 import it.vfsfitvnm.vimusic.models.Album
@@ -52,7 +51,13 @@ class PlayerMediaBrowserService : MediaBrowserService(), ServiceConnection {
         if (service is PlayerService.Binder) {
             bound = true
             sessionToken = service.mediaSession.sessionToken
-            service.mediaSession.setCallback(SessionCallback(service.player, service.downloadCache))
+            service.mediaSession.setCallback(
+                SessionCallback(
+                    service.player,
+                    service::isSongDownloaded,
+                    service::toggleLikeFromMediaSession
+                )
+            )
         }
     }
 
@@ -221,14 +226,21 @@ class PlayerMediaBrowserService : MediaBrowserService(), ServiceConnection {
             BrowserMediaItem.FLAG_PLAYABLE
         )
 
-    private inner class SessionCallback(private val player: Player, private val cache: Cache) :
-        MediaSession.Callback() {
+    private inner class SessionCallback(
+        private val player: Player,
+        private val isDownloaded: (String, Long?) -> Boolean,
+        private val toggleLike: () -> Unit
+    ) : MediaSession.Callback() {
         override fun onPlay() = player.play()
         override fun onPause() = player.pause()
         override fun onSkipToPrevious() = player.forceSeekToPrevious()
         override fun onSkipToNext() = player.forceSeekToNext()
         override fun onSeekTo(pos: Long) = player.seekTo(pos)
         override fun onSkipToQueueItem(id: Long) = player.seekToDefaultPosition(id.toInt())
+
+        override fun onCustomAction(action: String, extras: Bundle?) {
+            if (action == PlayerService.LikeAction) toggleLike()
+        }
 
         override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
             val data = mediaId?.split('/') ?: return
@@ -254,9 +266,7 @@ class PlayerMediaBrowserService : MediaBrowserService(), ServiceConnection {
                         .songsWithContentLength()
                         .first()
                         .filter { song ->
-                            song.contentLength?.let {
-                                cache.isCached(song.song.id, 0, it)
-                            } ?: false
+                            isDownloaded(song.song.id, song.contentLength)
                         }
                         .map(SongWithContentLength::song)
                         .shuffled()

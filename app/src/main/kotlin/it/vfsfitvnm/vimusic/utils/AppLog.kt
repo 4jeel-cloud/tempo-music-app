@@ -80,7 +80,7 @@ object AppLog {
         lines.clear()
         appContext?.let { context ->
             runCatching { File(context.filesDir, LOG_FILE).delete() }
-            runCatching { File(context.cacheDir, CRASH_FILE).delete() }
+            runCatching { File(context.filesDir, CRASH_FILE).delete() }
         }
     }
 
